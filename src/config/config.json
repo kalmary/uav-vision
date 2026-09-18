@@ -1,0 +1,12 @@
+{
+  "camera_source": "0",
+  "camera_width": 1280,
+  "camera_height": 720,
+  "camera_fps": 30,
+  "processing": "detection",
+  "model_size": "n",
+  "device": "cpu",
+  "display": false,
+  "display_width": 1280,
+  "display_height": 720
+}

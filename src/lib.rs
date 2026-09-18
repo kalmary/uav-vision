@@ -1,14 +1,7 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+// Responsibility: Define the public crate surface and connect the application modules.
+// Input: Validated runtime configuration supplied by the executable or another Rust caller.
+// Output: Application lifecycle results and public domain types needed by callers.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod capture;
+pub mod config;
+pub mod domain;

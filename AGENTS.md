@@ -1,5 +1,19 @@
 # TASK
 
+Build a real-time computer-vision application for an NVIDIA Jetson Nano mounted on an unmanned aerial vehicle (UAV). The application must:
+
+- Capture a live video stream from a camera connected to the Jetson Nano.
+- Run object detection on each captured frame using the latest YOLO version supported by the target platform.
+- Use a small, resource-efficient YOLO model suitable for the Jetson Nano by default.
+- Produce detected object classes and their bounding boxes for every processed frame.
+- Optionally display the live camera stream with class labels and bounding boxes overlaid on the image.
+- Expose runtime configuration through a command-line interface, including:
+  - processing type; initially, only object detection with classes and bounding boxes is supported;
+  - whether the processed video window is displayed;
+  - display dimensions;
+  - YOLO model-size selection.
+
+The core capture and inference pipeline must work without the optional display so that the application can run headlessly on the UAV.
 
 
 # Engineering Guidelines
@@ -21,7 +35,7 @@ When instructions conflict, follow this order:
 - State assumptions when the repository does not provide enough evidence. Ask before making a choice that would materially change behavior or scope.
 - For multi-step work, use a short plan in which each step has a concrete verification method.
 
-## Design Data First
+## Design Data First and Design Guidelines
 
 - Start with the data model, state transitions, inputs, outputs, ownership, and invariants.
 - Prefer data structures that make valid states and the common path easy to express.
@@ -33,6 +47,7 @@ When instructions conflict, follow this order:
   - If a task is more complex or requires a framework abstraction, use the framework layer or pattern.
   - If the task is complex and ready solution exists, use it.
   - Always pick library which is most popular and well-maintained choice in given field.
+  - Keep modules separate and with layers which will make adding new features easier - another model choice, free space for data interpretation, interpreted data sending.
 
 ## Prefer Simple, Direct Code
 
@@ -43,6 +58,7 @@ When instructions conflict, follow this order:
 - Choose descriptive, general names based on purpose. Do not rename unrelated identifiers or over-elaborate names.
 - Add comments only when they explain intent, constraints, or a non-obvious decision. Do not comment that merely restate the code. In general safe commenting code is best. Proper naming of its parts should usually suffice, unless there is a fancy solution, hard to understand without comments.
 - Do not add references to AI tools, generated code, prompts, or the development conversation.
+- When writing rust code i want separate modules to be in structure: module_name.rs + modelune_name/ - no mod.rs
 
 ## Keep Changes Surgical
 
@@ -85,6 +101,7 @@ When instructions conflict, follow this order:
 - Support technical conclusions with code references, test output, measurements, or reproducible behavior.
 - Be direct and specific about flaws in code or design, but remain professional and never attack a person.
 - Distinguish confirmed facts from assumptions and recommendations.
+- Rethink if found problem is a valid one, which may in fact affect the codebase.
 - Explain the outcome and important tradeoffs concisely; avoid narrating routine tool use.
 
 ## Version Control
@@ -107,3 +124,19 @@ When instructions conflict, follow this order:
 - As an LLM you are able to edit documentation when requested.
 - You should do this withour use of extra python/ any other extra scripts.
 - You can use script when file format doesn't support editing directly.
+- After every prompt concerning repository work, add one concise bullet to the `Work Log` in `docs/status.md`. Each bullet must summarize the request and the completed result.
+- Keep at most 50 `Work Log` bullets. When adding a fifty-first entry, remove the oldest entry.
+
+## Agent based workflow
+
+- When task is complex and requires multiple steps, use an agent-based workflow.
+- You can use Superpowers skills then.
+- Uses Sol with high reasoning for architecture, planning, ambiguous problems, security analysis, and difficult reviews.
+- Uses Terra with medium or high reasoning by default for implementation, repository exploration, testing, and documentation.
+- Reserves Luna for mechanical, repetitive, low-risk, fully specified work—not substantive implementation.
+- Uses Astra only as an exception when explicitly requested or when Sol is demonstrably insufficient.
+- Requires explicitly selecting both the model and reasoning effort.
+- Allows parallel agents only for independent tasks without overlapping file ownership.
+- Requires every delegation to define scope, constraints, expected output, and verification.
+- Keeps integration decisions and final verification with the primary agent.
+- Requires reviewing and testing agent output rather than accepting it automatically.
