@@ -1,0 +1,22 @@
+{
+  "capture": {
+    "camera_type": "opencv",
+    "source": 0
+  },
+  "processing": {
+    "processing_type": "detection"
+  },
+  "inference": {
+    "model_size": "nano",
+    "model_path": null,
+    "device": null
+  },
+  "display": {
+    "enabled": false,
+    "width": 1280,
+    "height": 720
+  },
+  "log_level": "basic",
+  "log_path": null,
+  "yolo_config_path": "yolo.json"
+}

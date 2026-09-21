@@ -1,0 +1,9 @@
+{
+  "detection": {
+    "nano": "yolo26n.pt",
+    "small": "yolo26s.pt",
+    "medium": "yolo26m.pt",
+    "large": "yolo26l.pt",
+    "xlarge": "yolo26x.pt"
+  }
+}

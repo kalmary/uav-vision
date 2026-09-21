@@ -62,3 +62,8 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Assess Step 5 hardware needs — separated locally preparable deployment work from validation that requires a physical Jetson Nano.
 - Prepare Step 5 without hardware — documented laptop use and a Jetson deployment and validation runbook with hardware-only results left pending.
 - Correct the output contract — removed per-frame JSON output and retained display output while deferring filtered headless logging.
+- Audit the output correction — confirmed code, tests, and documentation no longer use per-frame JSON output.
+- Replan remaining work — split Jetson preparation from pending hardware validation and defined structured Step 6 configuration, mode, and logging stages.
+- Audit Step 6 quality — confirmed broad guideline compliance and identified sequencing and contract gaps to correct before implementation.
+- Correct Step 6 sequencing — reordered contracts, logging, filtering, CLI migration, and mode work while defining diagnostics ownership.
+- Resolve test type warnings — narrowed optional display settings and locally suppressed intentional invalid-argument cases.

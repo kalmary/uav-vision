@@ -38,6 +38,7 @@ def test_cli_accepts_a_gstreamer_source_explicit_model_and_display_dimensions():
     assert str(settings.inference.model_path) == "detector.engine"
     assert settings.inference.model_size is None
     assert settings.inference.device == "cuda:0"
+    assert settings.display is not None
     assert settings.display.width == 960
     assert settings.display.height == 540
 

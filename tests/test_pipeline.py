@@ -1,9 +1,19 @@
+import subprocess
+import sys
 from datetime import datetime, timezone
 
 import numpy as np
 import pytest
 
-from uav_vision.domain import Frame, ProcessedFrame
+from uav_vision.domain import (
+    DepthResult,
+    DetectionResult,
+    Frame,
+    ProcessedFrame,
+    ProcessingDiagnostics,
+    SegmentationClass,
+    SegmentationResult,
+)
 from uav_vision.pipeline import run_pipeline
 
 
@@ -44,7 +54,11 @@ class ProcessorDouble:
             raise self._error
         if self._results is not None:
             return self._results[len(self.calls) - 1]
-        return ProcessedFrame(input_frame, ())
+        return ProcessedFrame(
+            input_frame,
+            DetectionResult(()),
+            ProcessingDiagnostics(None, 0.0, None, 0, 0),
+        )
 
 
 class OutputDouble:
@@ -105,7 +119,11 @@ def test_processes_each_frame_once_before_end_of_stream():
 def test_delivers_the_same_processed_frame_to_all_outputs_before_stopping():
     input_frame = frame(1)
     source = SourceDouble((input_frame,))
-    processed = ProcessedFrame(input_frame, ())
+    processed = ProcessedFrame(
+        input_frame,
+        DetectionResult(()),
+        ProcessingDiagnostics(None, 0.0, None, 0, 0),
+    )
     processor = ProcessorDouble(results=(processed,))
     events = []
     first_output = OutputDouble(True, events=events, name="first")
@@ -113,10 +131,9 @@ def test_delivers_the_same_processed_frame_to_all_outputs_before_stopping():
 
     run_pipeline(source, processor, (first_output, second_output))
 
-    assert first_output.calls == [processed]
-    assert first_output.calls[0] is processed
-    assert second_output.calls == [processed]
-    assert second_output.calls[0] is processed
+    assert first_output.calls[0] is second_output.calls[0]
+    assert first_output.calls[0].frame is processed.frame
+    assert first_output.calls[0].result is processed.result
     assert events == ["first", "second"]
 
 
@@ -217,6 +234,73 @@ def test_leaves_source_and_outputs_open_for_the_application_to_close():
 
     assert source.close_calls == 0
     assert output.close_calls == 0
+
+
+def test_pipeline_attaches_its_capture_and_processing_measurements():
+    input_frame = frame(1)
+    processed = ProcessedFrame(
+        input_frame,
+        DetectionResult(()),
+        ProcessingDiagnostics(None, 0.25, None, 0, 0),
+    )
+    output = OutputDouble()
+
+    run_pipeline(
+        SourceDouble((input_frame,)),
+        ProcessorDouble(results=(processed,)),
+        (output,),
+        clock=iter((1.0, 1.05, 2.0, 2.3, 3.0, 3.1)).__next__,
+    )
+
+    diagnostics = output.calls[0].diagnostics
+    assert diagnostics.capture_duration == pytest.approx(0.05)
+    assert diagnostics.inference_duration == 0.25
+    assert diagnostics.processing_duration == pytest.approx(0.3)
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        SegmentationResult(
+            np.zeros((12, 16), dtype=np.uint8),
+            (SegmentationClass(0, "background"),),
+        ),
+        DepthResult(np.ones((12, 16), dtype=np.float32), "metre", 0.001),
+    ],
+)
+def test_pipeline_delivers_each_non_detection_result_variant(result):
+    input_frame = frame(1)
+    processed = ProcessedFrame(
+        input_frame,
+        result,
+        ProcessingDiagnostics(None, 0.0, None, 1, 1),
+    )
+    output = OutputDouble()
+
+    run_pipeline(
+        SourceDouble((input_frame,)), ProcessorDouble(results=(processed,)), (output,)
+    )
+
+    assert output.calls[0].result is result
+
+
+def test_importing_pipeline_does_not_import_concrete_runtime_components():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import uav_vision.pipeline; "
+            "forbidden = {'uav_vision.capture.opencv', "
+            "'uav_vision.capture.gstreamer', 'uav_vision.processing.detection', "
+            "'uav_vision.output.display', 'uav_vision.inference.ultralytics'}; "
+            "assert not forbidden.intersection(sys.modules)",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _raise(error):
