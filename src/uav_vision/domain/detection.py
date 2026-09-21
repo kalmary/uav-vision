@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from math import isfinite
 from numbers import Real
+from typing import Tuple
 
 
 def _is_finite_number(value: object) -> bool:
@@ -44,3 +45,16 @@ class Detection:
             raise ValueError("Confidence must be a finite probability")
         if not isinstance(self.bounding_box, BoundingBox):
             raise ValueError("Detection must have a bounding box")
+
+
+@dataclass(frozen=True)
+class DetectionResult:
+    detections: Tuple[Detection, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.detections, tuple) or not all(
+            isinstance(detection, Detection) for detection in self.detections
+        ):
+            raise ValueError(
+                "Detection result must contain a tuple of Detection values"
+            )

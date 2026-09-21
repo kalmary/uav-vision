@@ -93,9 +93,16 @@ def test_inference_rejects_an_invalid_device(device):
 @pytest.mark.parametrize(
     "settings",
     [
-        lambda: CaptureSettings(camera_type="gstreamer", source="pipeline"),
-        lambda: ProcessingSettings(processing_type="unsupported"),
-        lambda: InferenceSettings(model_size="nano"),
+        lambda: CaptureSettings(
+            camera_type="gstreamer",  # pyright: ignore[reportArgumentType]
+            source="pipeline",
+        ),
+        lambda: ProcessingSettings(
+            processing_type="unsupported",  # pyright: ignore[reportArgumentType]
+        ),
+        lambda: InferenceSettings(
+            model_size="nano",  # pyright: ignore[reportArgumentType]
+        ),
     ],
 )
 def test_settings_reject_non_enum_selections(settings):
@@ -105,7 +112,10 @@ def test_settings_reject_non_enum_selections(settings):
 
 def test_inference_rejects_a_model_path_that_is_not_a_path():
     with pytest.raises(ValueError, match="path"):
-        InferenceSettings(model_size=None, model_path="model.engine")
+        InferenceSettings(
+            model_size=None,
+            model_path="model.engine",  # pyright: ignore[reportArgumentType]
+        )
 
 
 def test_settings_keep_capture_processing_inference_and_display_separate():
@@ -117,4 +127,5 @@ def test_settings_keep_capture_processing_inference_and_display_separate():
     )
 
     assert settings.capture.source == "pipeline"
+    assert settings.display is not None
     assert settings.display.width == 1280

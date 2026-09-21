@@ -4,8 +4,6 @@ from .base import (
     CaptureReadError,
     FrameSource,
 )
-from .gstreamer import GStreamerCamera
-from .opencv import OpenCvCamera
 
 __all__ = (
     "CaptureError",
@@ -15,3 +13,15 @@ __all__ = (
     "GStreamerCamera",
     "OpenCvCamera",
 )
+
+
+def __getattr__(name):
+    if name == "GStreamerCamera":
+        from .gstreamer import GStreamerCamera
+
+        return GStreamerCamera
+    if name == "OpenCvCamera":
+        from .opencv import OpenCvCamera
+
+        return OpenCvCamera
+    raise AttributeError("module {!r} has no attribute {!r}".format(__name__, name))

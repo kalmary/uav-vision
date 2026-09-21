@@ -28,3 +28,12 @@
   - what is camera source? i dont think the user needs to tell. if its a laptop its 100% a laptop/ usb camera, detect automatically. if its jetson same situation - no need to multiply args.
 - only processing type now is detection. i assume others are ones i asked for above. if so they should be implemented as well. otherwise, all options should be visible
 - no cuda device visible error could be handled more elegantly
+
+
+after 2nd update of work plan:
+required working arguments for camera:
+- camera type: default opencv (we will change it laaaater)
+- camera source: if it is camera index, should be change to camera index (name), default 0
+
+- device should take cuda or cpu strings as input. cpu is default
+- no model path is necessary - we just choose which model to use based on processing type and model-size - its enough to download specific model/ use specific cached one

@@ -10,10 +10,12 @@ from uav_vision.config.models import ModelSize, model_path_for
 from uav_vision.config.settings import InferenceSettings
 from uav_vision.domain import Frame
 from uav_vision.inference import (
+    DepthEstimator,
     Detector,
     InferenceInitializationError,
     InferenceResultError,
     InferenceRunError,
+    Segmenter,
     UltralyticsDetector,
 )
 
@@ -68,6 +70,21 @@ def frame():
 
 def settings(device=None):
     return InferenceSettings(model_size=ModelSize.NANO, device=device)
+
+
+class SegmenterDouble:
+    def segment(self, input_frame):
+        return input_frame
+
+
+class DepthEstimatorDouble:
+    def estimate_depth(self, input_frame):
+        return input_frame
+
+
+def test_segmentation_and_depth_protocols_are_structurally_implemented():
+    assert isinstance(SegmenterDouble(), Segmenter)
+    assert isinstance(DepthEstimatorDouble(), DepthEstimator)
 
 
 def make_detector(model, detector_settings=None):

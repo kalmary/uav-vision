@@ -1,10 +1,14 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Tuple
+from math import isfinite
+from numbers import Real
+from typing import Optional, Union
 
 import numpy as np
 
-from .detection import Detection
+from .depth import DepthResult
+from .detection import DetectionResult
+from .segmentation import SegmentationResult
 
 
 @dataclass(frozen=True)
@@ -48,16 +52,67 @@ class Frame:
 
 
 @dataclass(frozen=True)
+class ProcessingDiagnostics:
+    capture_duration: Optional[float]
+    inference_duration: float
+    processing_duration: Optional[float]
+    raw_count: int
+    retained_count: int
+
+    def __post_init__(self) -> None:
+        for name, value, optional in (
+            ("capture duration", self.capture_duration, True),
+            ("inference duration", self.inference_duration, False),
+            ("processing duration", self.processing_duration, True),
+        ):
+            if value is None and optional:
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(name + " must be a non-negative finite number")
+        for name, value in (
+            ("raw count", self.raw_count),
+            ("retained count", self.retained_count),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(name + " must be a non-negative integer")
+        if self.retained_count > self.raw_count:
+            raise ValueError("Retained result count must not exceed raw result count")
+
+
+Result = Union[DetectionResult, SegmentationResult, DepthResult]
+
+
+@dataclass(frozen=True)
 class ProcessedFrame:
     frame: Frame
-    detections: Tuple[Detection, ...]
+    result: Result
+    diagnostics: ProcessingDiagnostics
 
     def __post_init__(self) -> None:
         if not isinstance(self.frame, Frame):
             raise ValueError("Processed frame must contain a frame")
-        if not isinstance(self.detections, tuple) or not all(
-            isinstance(detection, Detection) for detection in self.detections
+        if not isinstance(
+            self.result, (DetectionResult, SegmentationResult, DepthResult)
         ):
-            raise ValueError(
-                "Processed frame detections must be a tuple of Detection values"
-            )
+            raise ValueError("Processed frame must contain exactly one result")
+        if not isinstance(self.diagnostics, ProcessingDiagnostics):
+            raise ValueError("Processed frame must contain diagnostics")
+        if isinstance(self.result, SegmentationResult):
+            result_height, result_width = self.result.class_map.shape
+        elif isinstance(self.result, DepthResult):
+            result_height, result_width = self.result.depth_map.shape
+        else:
+            return
+        if result_width != self.frame.width or result_height != self.frame.height:
+            raise ValueError("Processed result dimensions must match the frame")
+
+    @property
+    def detections(self) -> tuple:
+        if not isinstance(self.result, DetectionResult):
+            raise AttributeError("Only detection results have detections")
+        return self.result.detections

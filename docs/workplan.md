@@ -180,29 +180,270 @@ Do not initially add a dependency-injection framework, alternate image library, 
 
 ## Step 5: Jetson Nano deployment and validation
 
-### Files
+Step 5 is split between completed local preparation and final validation that requires the physical target. Step 6 may be implemented and verified on the laptop while Step 5b waits for the Jetson Nano. Before Step 5b begins, its runbook commands must be aligned with the final Step 6 CLI and configuration files.
+
+### Step 5a: Local deployment preparation — complete
+
+#### Files
 
 - `README.md`
-- deployment configuration or scripts justified by the validated Jetson environment
-- Jetson-focused tests or fixtures under `tests/` where hardware is not required
+- `docs/jetson-deployment.md`
 
-### Work
+#### Work
 
-- Document the supported JetPack 4 Python or container environment and exact dependency versions.
-- Export or obtain the nano YOLO model in a TensorRT format supported by the target Jetson Nano.
-- Build the engine on the target device when required by TensorRT compatibility.
-- Document tested CSI, USB, or GStreamer camera configurations without embedding one board-specific pipeline into the core loop.
-- Measure capture rate, inference latency, end-to-end frame rate, memory use, and thermal behavior under representative UAV settings.
-- Record the newest YOLO model version demonstrated to work on the target rather than claiming untested compatibility.
+- Document laptop installation and camera use.
+- Document the candidate JetPack 4 environment, stock headless container, and the native or custom OpenCV environment required by CSI and display.
+- Document the target-side TensorRT export procedure, camera templates, display setup, measurement fields, and acceptance checklist.
+- Keep target-only versions and results marked pending rather than claiming untested compatibility.
 
-### Verification
+#### Verification
+
+- Laptop and Jetson instructions use the implemented entry points and options.
+- Stock-container and GUI/GStreamer paths are clearly separated.
+- TensorRT engines are documented as target-specific and built on the target.
+- Hardware-only version, camera, GPU, performance, and thermal results remain explicitly pending.
+
+### Step 5b: Physical Jetson validation — waiting for Jetson Nano
+
+#### Work
+
+- Record the exact board, JetPack/L4T, image digest, Python, OpenCV, PyTorch, TensorRT, Ultralytics, model, and power-mode versions.
+- Build the selected nano TensorRT engines on the target device.
+- Validate automatic USB and CSI/GStreamer camera selection in the final Step 6 application.
+- Validate mandatory logging in headless and display runs.
+- Measure capture rate, inference latency, end-to-end frame rate, memory, swap, GPU use, power, and thermal behavior under representative UAV settings.
+- Record the newest YOLO model and every processing mode demonstrated to work on the target.
+
+#### Verification
 
 - Headless processing captures and processes live frames on the Jetson Nano.
 - TensorRT inference uses the Jetson GPU and does not silently fall back to CPU.
-- Optional display shows labelled bounding boxes at the requested dimensions.
+- Basic and debug logs contain the required mode-specific information without images or complete result arrays.
+- Optional display renders the selected mode at the requested dimensions.
 - The application shuts down cleanly and releases camera resources.
 - `ruff check .`, `ruff format --check .`, and `pytest` pass in the supported development environment.
 - Target-device smoke-test results and measured performance are recorded.
+
+## Step 6: Configuration, processing modes, and mandatory logging
+
+Step 6 replaces temporary silent headless processing with mandatory logging and introduces user-editable defaults plus the remaining requested processing modes. Every substep follows test-first development and leaves the complete suite passing.
+
+### Step 6a: Configuration files and precedence
+
+#### Files
+
+- `pyproject.toml`
+- `src/uav_vision/config/defaults/app.json`
+- `src/uav_vision/config/defaults/yolo.json`
+- `src/uav_vision/config/loader.py`
+- `src/uav_vision/config/settings.py`
+- configuration tests under `tests/`
+
+#### Work
+
+- Package readable JSON defaults for application settings and mode-specific YOLO settings.
+- Put `log_level: basic` in the application defaults rather than relying only on a Python default.
+- Add `LogLevel` with `basic` and `debug`, an optional log path, and paths connecting application and YOLO configuration.
+- Merge settings with the fixed precedence: explicit CLI values, selected user configuration, then packaged defaults.
+- Permit partial user files while rejecting missing files, unknown keys, invalid types, invalid enum values, and invalid mode-specific combinations.
+- Resolve a relative YOLO configuration path relative to its application configuration file.
+- Mark JSON defaults as package data so installed and editable environments behave the same.
+
+#### Verification
+
+- Packaged defaults alone produce valid settings and prove that `basic` came from the file.
+- Partial and complete user overrides preserve unspecified defaults.
+- Explicit CLI values win over both file layers.
+- Missing files, malformed JSON, unknown keys, wrong types, and invalid values fail descriptively.
+- Built and editable installs contain both default files.
+
+### Step 6b: Mode-neutral result, processing, and diagnostics contracts
+
+#### Files
+
+- `src/uav_vision/domain/frame.py`
+- `src/uav_vision/domain/detection.py`
+- `src/uav_vision/domain/segmentation.py`
+- `src/uav_vision/domain/depth.py`
+- `src/uav_vision/inference/base.py`
+- `src/uav_vision/processing/base.py`
+- `src/uav_vision/pipeline.py`
+- domain, inference-contract, processing-contract, and pipeline tests under `tests/`
+
+#### Work
+
+- Replace the detection-only `ProcessedFrame` shape with exactly one validated `DetectionResult`, `SegmentationResult`, or `DepthResult`.
+- Define separate `Detector`, `Segmenter`, and `DepthEstimator` protocols using application-owned types.
+- Validate mask shapes, class metadata, finite depth maps, and agreement with the source frame.
+- Define immutable per-frame diagnostics: pipeline-owned capture and processing durations, processor-owned provider inference duration, and mode-owned raw and retained result counts.
+- Keep capture, pipeline, and outputs independent from Ultralytics result classes.
+
+#### Verification
+
+- A `ProcessedFrame` without a result, with mixed results, or with a mode-mismatched result cannot be constructed; an empty detection result remains valid.
+- Invalid detection fields, masks, class metadata, depth shapes, and non-finite depth values are rejected.
+- Diagnostics reject negative or non-finite durations and cannot be mutated after construction.
+- The pipeline processes every result variant without importing a provider or display backend.
+
+### Step 6c: Mandatory logger foundation and diagnostics
+
+#### Files
+
+- `src/uav_vision/output/log.py`
+- `src/uav_vision/output/__init__.py`
+- `src/uav_vision/app.py`
+- `src/uav_vision/pipeline.py`
+- logger, application, and pipeline tests under `tests/`
+
+#### Work
+
+- Construct the logger immediately after configuration resolution and before camera or model initialization; there is no configuration that disables it.
+- Give `LogOutput` explicit startup, diagnostic-event, per-frame, and close operations instead of hiding non-frame logging inside `FrameOutput.write()`.
+- At `basic`, report the fully resolved launch configuration exactly once.
+- At `debug`, include all basic records plus component initialization, frame identity and dimensions, camera/provider/model/device selection, raw and retained counts, capture/inference/processing timings, and exception tracebacks.
+- Write plain-text logs to the console when no path is configured and to the selected file otherwise.
+- Open a log file once, flush completed records, close it idempotently, redact credentials embedded in sources, and never log images or complete arrays.
+- Keep JSON and JSONL output absent. Do not add rotation, remote transport, or sampling.
+
+#### Verification
+
+- Headless and display runs create the logger before other runtime components and write exactly one launch-configuration record.
+- `debug` is an informational superset of `basic`.
+- Initialization failures are logged even when camera or model construction does not complete.
+- Each timing is measured by its declared owner and appears once in a debug frame record.
+- Console and file destinations behave identically and propagate open/write failures.
+- Cleanup runs after normal completion, interruption, component failure, and logger failure.
+
+### Step 6d: Detection filtering, reporting, and display
+
+#### Files
+
+- `src/uav_vision/config/defaults/yolo.json`
+- `src/uav_vision/config/settings.py`
+- `src/uav_vision/processing/detection.py`
+- `src/uav_vision/output/log.py`
+- `src/uav_vision/output/display.py`
+- detection, logger, and display tests under `tests/`
+
+#### Work
+
+- Add detection-only options for selected classes, minimum confidence, and global top-k.
+- Apply filters in order: class selection, confidence threshold, stable descending confidence order, then top-k.
+- Pass the same filtered `DetectionResult` to logger and display.
+- At `basic`, report each frame's class name, confidence, and bounding box for every retained detection, including an explicit empty result.
+- Display class name and confidence with each retained bounding box.
+
+#### Verification
+
+- Tests cover no filters, one and many classes, confidence boundaries, stable ties, zero results, and top-k below, equal to, and above the available count.
+- Logger and display observe the same ordered detection objects.
+- Empty and non-empty detections have deterministic, readable log records.
+- Display annotation does not mutate the source frame.
+
+### Step 6e: Mode-aware CLI, model resolution, and automatic camera selection
+
+#### Files
+
+- `src/uav_vision/config/cli.py`
+- `src/uav_vision/config/models.py`
+- `src/uav_vision/capture/auto.py`
+- `src/uav_vision/app.py`
+- `README.md`
+- `docs/jetson-deployment.md`
+- CLI, capture, application, and entry-point tests under `tests/`
+
+#### Work
+
+- Add `--config-path`, `--log-level {basic,debug}`, `--log-path`, and explicit positive and negative display overrides.
+- Parse configuration and processing mode before constructing the final parser so help lists only options relevant to `detection`, `segmentation`, or `depth`.
+- Remove public `--model-path`; resolve model size through the mode-specific YOLO configuration.
+- Keep provider-specific model identifiers and target TensorRT engine paths behind model resolution so another provider can be added without changing CLI contracts.
+- Do not add a project `models/` directory until the project actually owns local model artifacts.
+- Remove camera type and source from normal CLI use. Select OpenCV camera `0` on laptops and try configured Jetson candidates in deterministic order, reporting all failures if none opens.
+- Keep advanced camera overrides in configuration and preserve `uav-vision-usb` as a compatibility alias.
+- Replace opaque missing-CUDA failures with a concise error naming the requested device; never fall back silently.
+- Update README and Jetson commands in the same change that removes or replaces public CLI flags.
+
+#### Verification
+
+- General and mode-specific help expose common options plus only the selected mode's options.
+- CLI values override configuration without treating omitted arguments as overrides.
+- Each mode and model size resolves to the configured Ultralytics identifier or target engine.
+- Laptop selection uses OpenCV index `0`; Jetson candidates follow configured order.
+- Aggregate camera errors preserve every failed candidate, and unavailable CUDA reports a useful cause.
+- Documentation contains no command using a flag removed by this substep.
+
+### Step 6f: Semantic segmentation
+
+#### Files
+
+- `src/uav_vision/domain/segmentation.py`
+- segmentation inference adapter under `src/uav_vision/inference/`
+- `src/uav_vision/processing/segmentation.py`
+- `src/uav_vision/output/display.py`
+- YOLO defaults and segmentation tests under `tests/`
+
+#### Work
+
+- Use the configured nano semantic-segmentation model by default and keep Ultralytics objects inside the adapter.
+- Convert semantic masks and class metadata into `SegmentationResult`.
+- Log the number of unique classes present in every frame at `basic`; add provider and result diagnostics at `debug`.
+- Render a deterministic colour overlay and class labels when display is enabled.
+
+#### Verification
+
+- Tests cover zero, one, and multiple present classes, unknown classes, mismatched mask dimensions, and malformed provider data.
+- The logged class count means unique classes present in the frame, not instances or total model classes.
+- Headless mode never imports display resources, and display does not mutate source data.
+
+### Step 6g: Monocular depth estimation
+
+#### Files
+
+- `src/uav_vision/domain/depth.py`
+- depth inference adapter under `src/uav_vision/inference/`
+- `src/uav_vision/processing/depth.py`
+- `src/uav_vision/output/display.py`
+- YOLO defaults and depth tests under `tests/`
+
+#### Work
+
+- Use the configured nano Ultralytics depth model by default while keeping provider types behind `DepthEstimator`.
+- Preserve the model's documented units and scale in `DepthResult` rather than assuming arbitrary normalisation.
+- Compute minimum, maximum, mean, and standard deviation once per frame for `basic` logging.
+- Add raw-range and timing diagnostics at `debug`.
+- Render a controlled colour-map view without modifying source depth values.
+- Treat Jetson/TensorRT compatibility as part of pending Step 5b validation.
+
+#### Verification
+
+- Tests cover constant and varying maps, zero range, wrong shapes, non-finite values, statistics, and provider failures.
+- Logger statistics match the retained depth map and display normalisation handles degenerate ranges.
+- Headless and display paths consume the same `DepthResult`.
+
+### Step 6h: Integration, compatibility, and documentation refresh
+
+#### Files
+
+- `README.md`
+- `docs/architecture.md`
+- `docs/jetson-deployment.md`
+- entry-point and end-to-end tests under `tests/`
+
+#### Work
+
+- Document repository structure, installation profiles, configuration precedence, every current flag, all three modes, mandatory logging, and console/file examples.
+- Recheck that the earlier CLI migration removed obsolete public flags from every example and that TensorRT instructions use YOLO configuration.
+- Confirm existing capture, inference, cleanup, laptop entry-point, headless, and display behavior remains compatible with the new contracts.
+- Run laptop headless and display smoke tests, then update the pending Step 5b checklist with final commands.
+
+#### Verification
+
+- `ruff check .`, `ruff format --check .`, full `pytest`, and `uv lock --check` pass.
+- Built and editable installs contain both default configuration files.
+- CLI help matches the README for every processing mode.
+- There are no JSON/JSONL output references or obsolete public flags.
+- Laptop camera index `0` processes frames in headless and display modes with the mandatory logger.
 
 ## Working rule
 
