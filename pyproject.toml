@@ -11,6 +11,10 @@ dependencies = [
     "numpy>=1.24.4",
 ]
 
+[project.scripts]
+uav-vision = "uav_vision.entrypoints.main:main"
+uav-vision-usb = "uav_vision.entrypoints.usb_camera:main"
+
 [project.optional-dependencies]
 desktop = [
     "opencv-python>=4.11.0.86",

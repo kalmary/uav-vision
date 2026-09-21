@@ -2,7 +2,7 @@ import pytest
 
 from uav_vision.config.cli import parse_args
 from uav_vision.config.models import ModelSize
-from uav_vision.config.settings import CameraType
+from uav_vision.config.settings import CameraType, CaptureSettings
 
 
 def test_cli_defaults_to_headless_opencv_detection_with_camera_zero():
@@ -96,3 +96,30 @@ def test_cli_rejects_invalid_argument_values(arguments, message, capsys):
         parse_args(arguments)
 
     assert message in capsys.readouterr().err
+
+
+def test_cli_uses_injected_capture_defaults_and_allows_overrides():
+    settings = parse_args(
+        [],
+        capture_defaults=CaptureSettings(CameraType.GSTREAMER, "camera ! appsink"),
+    )
+
+    assert settings.capture == CaptureSettings(CameraType.GSTREAMER, "camera ! appsink")
+
+    settings = parse_args(
+        ["--camera-type", "opencv", "--camera-source", "3"],
+        capture_defaults=CaptureSettings(CameraType.GSTREAMER, "camera ! appsink"),
+    )
+
+    assert settings.capture == CaptureSettings(CameraType.OPENCV, 3)
+
+
+def test_cli_uses_custom_program_name_for_help(capsys):
+    with pytest.raises(SystemExit):
+        parse_args(["--help"], prog="uav-vision-usb")
+
+    help_text = capsys.readouterr().out
+    assert "usage: uav-vision-usb" in help_text
+    assert "--camera-type {opencv,gstreamer}" in help_text
+    assert "--processing-type {detection}" in help_text
+    assert "--model-size {nano,small,medium,large,xlarge}" in help_text
