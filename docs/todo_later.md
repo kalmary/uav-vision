@@ -1,0 +1,30 @@
+- cli should have arguments: config-path with default value - under it default config is stored and if any argument is not provided, the default is used. if another config path is given, it is used instead as fallback values.
+- where are models stored? it would be best to have a separate directory for models, so they are not mixed with other files. (dont code if not necessary)
+- in cli: model-path unnecessary - we use only models from ultralytics for now. it is possible that in the future we'll support other model sources. program structure should make the switch easy (ensure it is done now/ do it), but no other models are required.
+- in cli: extra yolo arguments are necessary:
+  - work mode: classification with bboxes? depthmap? semantic segmentation?
+  - if classification + bboxes options for choosing displayed/ returned bboxes should be there. top k elements/ threshold/ specific class or mutliple of it at once. as its getting
+  it should be done in a way that for specific yolo modes, relevant arguments are passed - in help we can see what arguments are available for each mode.
+- yolo modes to handle:
+  - bboxes + classes (default, in both display and headless modes it should show class name+ confidence score)
+  - semantic segmentation
+  - depthmap
+- logger should be implemented. as cli arguments are passed, you should have basic: info about launching configuration given once + filtered output from yolo (usefull when running in headless mode), adjusted for modes:
+  - bboxes + classes: bbox, confidence, class name (string)
+  - semantic segmentation: num of classes
+  - depthmap: min, max, mean, std
+- as yolo settings are complicated on its own, it should be moved to a separate config file - if any of arguments for given yolo mode is not provided, the default is used.
+- config files with defaults are missing - add them in place easily available for users to modify
+- make sure other parts of the code are still compatible with new ones.
+- README.md should be provided:
+  - what is uav-vision? simply, without non necessary descriptions
+  - repo structure
+  - how to install it?
+  - what are available flags both when installing and running?
+  - what is supported?
+  - how to use it?
+
+- other questions/ things to modify:
+  - what is camera source? i dont think the user needs to tell. if its a laptop its 100% a laptop/ usb camera, detect automatically. if its jetson same situation - no need to multiply args.
+- only processing type now is detection. i assume others are ones i asked for above. if so they should be implemented as well. otherwise, all options should be visible
+- no cuda device visible error could be handled more elegantly

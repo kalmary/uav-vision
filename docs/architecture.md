@@ -48,8 +48,7 @@ src/uav_vision/
 ├── output/
 │   ├── __init__.py
 │   ├── base.py
-│   ├── display.py
-│   └── json_lines.py
+│   └── display.py
 └── entrypoints/
     ├── __init__.py
     ├── main.py
@@ -87,7 +86,7 @@ Model-size aliases and their corresponding model names live in `config/models.py
 
 ### Output
 
-`FrameOutput` consumes a `ProcessedFrame` and may request shutdown. `JsonLinesOutput` provides class and bounding-box data during headless operation. `DisplayOutput` draws labels and boxes and owns all windowing behavior. Multiple outputs may receive the same processed frame.
+`FrameOutput` consumes a `ProcessedFrame` and may request shutdown. `DisplayOutput` draws labels and boxes and owns all windowing behavior. The pipeline also accepts no outputs, which keeps capture and inference independent from display. Filtered result logging will be added as a separate output.
 
 ## Entry points
 

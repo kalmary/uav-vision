@@ -6,9 +6,9 @@ The Rust implementation was removed. The project is planned as a modular Python 
 | --- | --- |
 | 1. Python Foundation, Domain Types, and Configuration | Complete |
 | 2. Replaceable Camera Capture | Implemented; hardware smoke test pending |
-| 3. Replaceable YOLO Inference and Processing Mode | Not started |
-| 4. Headless Pipeline, Outputs, and Entry Points | Not started |
-| 5. Jetson Nano Deployment and Validation | Not started |
+| 3. Replaceable YOLO Inference and Processing Mode | Complete |
+| 4. Headless Pipeline, Outputs, and Entry Points | Implemented; live camera/display smoke tests pending |
+| 5. Jetson Nano Deployment and Validation | Prepared locally; Jetson hardware validation pending |
 
 ## Current decisions
 
@@ -18,7 +18,7 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Laptop and USB cameras receive a dedicated entry point backed by the shared pipeline.
 - Jetson acceleration uses an Ultralytics-compatible TensorRT engine validated on the target device.
 - Ultralytics, NumPy, and platform-appropriate OpenCV builds are the initial runtime packages; pytest, pytest-cov, Ruff, setuptools, wheel, and uv support development.
-- Headless JSON Lines output remains independent from optional display behavior.
+- Headless capture and inference remain independent from optional display behavior; filtered result logging is planned separately.
 
 ## Work Log
 
@@ -54,3 +54,11 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Summarize implementation status — confirmed that Step 1 is complete and camera, inference, pipeline, display implementation, and Jetson validation remain pending.
 - Scope the next implementation step — reviewed all Markdown and code, defined the Step 2 capture contract, and requested approval before coding.
 - Approve Step 2 implementation — added replaceable OpenCV and GStreamer capture with explicit errors, cleanup, and automated tests.
+- Continue with Step 3 — reviewed the documentation and implemented replaceable YOLO inference and detection processing test-first.
+- Audit Step 3 completeness — confirmed all planned code is present through independent review and a real nano-model smoke test.
+- Implement Step 4 — added JSON and display outputs, the headless pipeline, application composition, and both console entry points.
+- Correct generated file scope — removed redundant root scripts and left `docs/todo_later.md` untouched as requested.
+- Report remaining Step 4 work — completed final review, CLI smoke tests, and compatibility verification.
+- Assess Step 5 hardware needs — separated locally preparable deployment work from validation that requires a physical Jetson Nano.
+- Prepare Step 5 without hardware — documented laptop use and a Jetson deployment and validation runbook with hardware-only results left pending.
+- Correct the output contract — removed per-frame JSON output and retained display output while deferring filtered headless logging.

@@ -152,7 +152,6 @@ Do not initially add a dependency-injection framework, alternate image library, 
 - `src/uav_vision/output/__init__.py`
 - `src/uav_vision/output/base.py`
 - `src/uav_vision/output/display.py`
-- `src/uav_vision/output/json_lines.py`
 - `src/uav_vision/pipeline.py`
 - `src/uav_vision/app.py`
 - `src/uav_vision/entrypoints/__init__.py`
@@ -162,9 +161,9 @@ Do not initially add a dependency-injection framework, alternate image library, 
 
 ### Work
 
-- Define `FrameOutput` and implement JSON Lines output for one structured result per processed frame.
+- Define `FrameOutput` and implement optional display output.
 - Implement optional annotation and display without putting windowing code on the headless path.
-- Build the processing loop around `FrameSource`, `FrameProcessor`, and configured outputs.
+- Build the processing loop around `FrameSource`, `FrameProcessor`, and zero or more configured outputs.
 - Stop cleanly on end-of-stream, display shutdown, keyboard interruption, or an injected shutdown request.
 - Propagate component failures and close all initialized resources.
 - Compose concrete components in `app` from validated settings.
@@ -173,7 +172,7 @@ Do not initially add a dependency-injection framework, alternate image library, 
 
 ### Verification
 
-- Integration tests cover successful headless processing, structured output, end-of-stream, shutdown, component errors, and cleanup.
+- Integration tests cover successful headless processing, end-of-stream, shutdown, component errors, and cleanup.
 - Display tests verify annotation and requested dimensions without requiring a graphical session.
 - Entry-point tests confirm that the USB entry point changes only the camera defaults.
 - Manual laptop testing validates live USB capture and optional display.
@@ -198,7 +197,7 @@ Do not initially add a dependency-injection framework, alternate image library, 
 
 ### Verification
 
-- Headless processing captures live frames and emits detections on the Jetson Nano.
+- Headless processing captures and processes live frames on the Jetson Nano.
 - TensorRT inference uses the Jetson GPU and does not silently fall back to CPU.
 - Optional display shows labelled bounding boxes at the requested dimensions.
 - The application shuts down cleanly and releases camera resources.
