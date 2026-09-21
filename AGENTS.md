@@ -119,6 +119,14 @@ When instructions conflict, follow this order:
 - If tests fail, explain why and identify the remaining uncertainty.
 - We use pytest for testing. No need for complex testing structure.
 
+## Python dependencies
+
+- Classify every Python package before adding it.
+- Packages imported or otherwise required by application code belong in the main project dependencies.
+- Packages used only for tests, coverage, linting, formatting, or other development verification belong in the `test` dependency group.
+- Build backends and packaging requirements belong in `build-system`, not in the main or test dependency groups.
+- Add packages with `uv`; do not install an unrecorded dependency directly into the environment.
+
 ## Editing documentation
 
 - As an LLM you are able to edit documentation when requested.

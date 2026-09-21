@@ -1,12 +1,24 @@
 # Project Status
 
+The Rust implementation was removed. The project is planned as a modular Python application targeting both NVIDIA Jetson Nano cameras and conventional laptop or USB cameras.
+
 | Workplan step | Status |
 | --- | --- |
-| 1. Domain Types and CLI Configuration | Implemented |
-| 2. Camera Capture | Implemented; Jetson hardware validation pending |
-| 3. YOLO Inference | Not started |
-| 4. Headless Processing Pipeline | Not started |
-| 5. Display and Jetson Validation | Not started |
+| 1. Python Foundation, Domain Types, and Configuration | Complete |
+| 2. Replaceable Camera Capture | Implemented; hardware smoke test pending |
+| 3. Replaceable YOLO Inference and Processing Mode | Not started |
+| 4. Headless Pipeline, Outputs, and Entry Points | Not started |
+| 5. Jetson Nano Deployment and Validation | Not started |
+
+## Current decisions
+
+- Python replaces Rust for the application implementation.
+- All application code belongs under `src/uav_vision/`; only tests, metadata, and documentation live outside `src/`.
+- Camera sources, inference providers, processing modes, and outputs use small replaceable interfaces.
+- Laptop and USB cameras receive a dedicated entry point backed by the shared pipeline.
+- Jetson acceleration uses an Ultralytics-compatible TensorRT engine validated on the target device.
+- Ultralytics, NumPy, and platform-appropriate OpenCV builds are the initial runtime packages; pytest, pytest-cov, Ruff, setuptools, wheel, and uv support development.
+- Headless JSON Lines output remains independent from optional display behavior.
 
 ## Work Log
 
@@ -28,3 +40,17 @@
 - Consider runtime-loaded defaults — evaluated disk loading, then superseded it before implementation.
 - Select compile-time embedding — placed the editable defaults in `src/config/config.json` and embedded them in the binary.
 - Approve the configuration design — implemented JSON fallback, CLI precedence, validation, executable parsing, and focused tests.
+- Review repository documentation — read all four Markdown files and recorded the current requirements, architecture, status, and work plan.
+- Evaluate Rust GPU inference — confirmed Jetson Nano CUDA is viable through its JetPack TensorRT stack, while the current Ultralytics Rust crate cannot provide compatible AArch64 GPU binaries.
+- Reset the implementation language — removed the Rust source, tests, Cargo metadata, and generated build artifacts, then replanned the application as modular Python with separate Jetson and USB-camera adapters.
+- Refresh ignored files — replaced the obsolete Rust target rule with macOS, Zed, Python, virtual-environment, build, test-cache, coverage, and local-environment patterns.
+- Fix the Python source boundary — made `src/uav_vision/` the required location for every application module and entry point.
+- Select initial Python packages — documented maintained dependencies, mutually exclusive OpenCV variants, and preservation of JetPack-provided GPU libraries in the work plan.
+- Implement Python Step 1 — added the package foundation, validated domain and configuration types, CLI parsing, mutually exclusive runtime profiles, dependency groups, and passing tests and Ruff checks.
+- Clarify runtime dependencies — documented why each installation must select exactly one desktop, generic-headless, or Jetson platform profile.
+- Clarify Python support — kept Python 3.8 as the JetPack 4 compatibility floor while confirming Python 3.12 as the desktop development runtime.
+- Explain deployment profiles — documented the planned laptop installation and dependency-preserving JetPack 4 container workflow.
+- Preserve optional Jetson display — confirmed the shared `--display` configuration and documented use of JetPack-provided GUI OpenCV without the desktop extra.
+- Summarize implementation status — confirmed that Step 1 is complete and camera, inference, pipeline, display implementation, and Jetson validation remain pending.
+- Scope the next implementation step — reviewed all Markdown and code, defined the Step 2 capture contract, and requested approval before coding.
+- Approve Step 2 implementation — added replaceable OpenCV and GStreamer capture with explicit errors, cleanup, and automated tests.
