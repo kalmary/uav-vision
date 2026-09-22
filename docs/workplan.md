@@ -52,7 +52,9 @@ Do not initially add a dependency-injection framework, alternate image library, 
 - Support headless processing without importing or opening display resources.
 - Use application-owned domain types across module boundaries.
 - Keep camera, inference-provider, processing-mode, and output changes isolated behind small protocols.
-- Use the smallest supported YOLO model by default while accepting a model-size alias or explicit model path.
+- Use the smallest supported YOLO model by default and resolve it only from the selected processing type and model-size alias; do not expose an arbitrary model path.
+- Default to OpenCV camera index `0`, CPU inference, and a maximum processing rate of 30 frames per second.
+- Always pass the input dimensions configured for the resolved model to inference; do not assume one size for every model.
 - Report invalid configuration, camera failures, model failures, and processing failures explicitly.
 - Develop behavior test-first and run the complete pytest suite after every step.
 
@@ -79,7 +81,7 @@ Do not initially add a dependency-injection framework, alternate image library, 
 - Define validated frame, bounding-box, detection, and processed-frame data classes.
 - Keep the shared frame representation as contiguous BGR `uint8` data.
 - Define typed settings for capture, processing, inference, and optional display.
-- Add CLI options for camera type and source, processing type, model size or path, inference device, display toggle, and display dimensions.
+- Add the initial CLI options for camera selection, processing type, model selection, inference device, display toggle, and display dimensions; Step 6e replaces their temporary shape with the final grouped contract.
 - Centralize model-size-to-name mappings in `config/models.py`.
 - Default to detection, the nano model, headless output, and an appropriate camera source.
 
@@ -132,7 +134,7 @@ Do not initially add a dependency-injection framework, alternate image library, 
 ### Work
 
 - Define the `Detector` protocol in terms of application frames and detections.
-- Implement Ultralytics model loading from a configured size alias or explicit model path.
+- Implement Ultralytics model loading from the configured size alias; Step 6e removes the temporary explicit model-path escape hatch from configuration and CLI.
 - Pass the selected inference device to Ultralytics without silent fallback in application code.
 - Run detection on BGR frames and convert result boxes, class identifiers, labels, and confidence values into application types.
 - Define the `FrameProcessor` protocol and implement `DetectionProcessor` as the initial mode.
@@ -209,7 +211,7 @@ Step 5 is split between completed local preparation and final validation that re
 
 - Record the exact board, JetPack/L4T, image digest, Python, OpenCV, PyTorch, TensorRT, Ultralytics, model, and power-mode versions.
 - Build the selected nano TensorRT engines on the target device.
-- Validate automatic USB and CSI/GStreamer camera selection in the final Step 6 application.
+- Validate explicit OpenCV USB-camera and configured CSI/GStreamer selection in the final Step 6 application.
 - Validate mandatory logging in headless and display runs.
 - Measure capture rate, inference latency, end-to-end frame rate, memory, swap, GPU use, power, and thermal behavior under representative UAV settings.
 - Record the newest YOLO model and every processing mode demonstrated to work on the target.
@@ -340,40 +342,88 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 - Empty and non-empty detections have deterministic, readable log records.
 - Display annotation does not mutate the source frame.
 
-### Step 6e: Mode-aware CLI, model resolution, and automatic camera selection
+### Step 6e: Grouped CLI and resolved runtime configuration
 
 #### Files
 
 - `src/uav_vision/config/cli.py`
 - `src/uav_vision/config/models.py`
-- `src/uav_vision/capture/auto.py`
+- `src/uav_vision/config/defaults/app.json`
+- `src/uav_vision/config/defaults/yolo.json`
+- `src/uav_vision/config/loader.py`
+- `src/uav_vision/config/settings.py`
 - `src/uav_vision/app.py`
-- `README.md`
-- `docs/jetson-deployment.md`
-- CLI, capture, application, and entry-point tests under `tests/`
+- `src/uav_vision/output/log.py`
+- `src/uav_vision/entrypoints/main.py`
+- `src/uav_vision/entrypoints/usb_camera.py`
+- CLI, configuration, application, and entry-point tests under `tests/`
 
 #### Work
 
-- Add `--config-path`, `--log-level {basic,debug}`, `--log-path`, and explicit positive and negative display overrides.
-- Parse configuration and processing mode before constructing the final parser so help lists only options relevant to `detection`, `segmentation`, or `depth`.
-- Remove public `--model-path`; resolve model size through the mode-specific YOLO configuration.
-- Keep provider-specific model identifiers and target TensorRT engine paths behind model resolution so another provider can be added without changing CLI contracts.
+- Organize CLI help into configuration, camera, processing/inference, display, logging, and runtime groups rather than presenting one flat option list.
+- Add `--config-path`, `--log-level {basic,debug}`, `--log-path`, `--fps`, and explicit positive and negative display overrides.
+- Keep `--display-width` and `--display-height` together in the display group and apply them only to display configuration; validate both as positive integers.
+- Expose `--camera-type {opencv,gstreamer}` and keep `opencv` as the default until a later workplan revision explicitly changes camera selection.
+- Replace a numeric `--camera-source` with the accurately named `--camera-index`; accept a non-negative integer and default it to `0` for OpenCV capture. Keep a textual GStreamer pipeline or other non-index source in configuration rather than calling it an index.
+- Accept only `cpu` and `cuda` for `--device`, with `cpu` in the packaged defaults. Report unavailable requested CUDA explicitly and never fall back silently.
+- Accept `--fps` as a positive integer with packaged default `30`. In this substep it becomes validated immutable configuration; Step 6f applies the limit to the processing loop.
+- Parse configuration and processing mode before constructing the final parser so help lists common groups plus only options relevant to `detection`, `segmentation`, or `depth`.
+- Remove `--model-path` and the corresponding application setting. Resolve the model exclusively from processing type plus `--model-size`; an Ultralytics identifier may be downloaded or loaded from its normal cache.
+- Keep provider-specific identifiers and target TensorRT engine references inside the YOLO configuration and model resolver so another provider can be added without changing CLI contracts.
+- Route every entry point through the same configuration loader and model resolver. Do not construct a partial `AppSettings` directly from parser defaults, because that bypasses packaged application and YOLO defaults.
+- Complete configuration and model resolution before constructing runtime components or writing the startup record. The selected processing type and model size must always resolve a YOLO origin and concrete model identifier.
+- Make the single startup record report the complete effective configuration, including camera type and index or configured source, processing type, model size and resolved model identifier, device, FPS, display enabled state and dimensions, logging level and destination, and YOLO configuration origin. Optional values must be reported as an explicit state such as `disabled` or `console`, not as missing unresolved defaults.
 - Do not add a project `models/` directory until the project actually owns local model artifacts.
-- Remove camera type and source from normal CLI use. Select OpenCV camera `0` on laptops and try configured Jetson candidates in deterministic order, reporting all failures if none opens.
-- Keep advanced camera overrides in configuration and preserve `uav-vision-usb` as a compatibility alias.
-- Replace opaque missing-CUDA failures with a concise error naming the requested device; never fall back silently.
-- Update README and Jetson commands in the same change that removes or replaces public CLI flags.
+- Preserve `uav-vision-usb` as a compatibility alias using OpenCV camera index `0` unless explicitly overridden.
 
 #### Verification
 
-- General and mode-specific help expose common options plus only the selected mode's options.
+- General and mode-specific help expose clearly named groups, with display dimensions in the display group and only the selected mode's processing options.
 - CLI values override configuration without treating omitted arguments as overrides.
-- Each mode and model size resolves to the configured Ultralytics identifier or target engine.
-- Laptop selection uses OpenCV index `0`; Jetson candidates follow configured order.
-- Aggregate camera errors preserve every failed candidate, and unavailable CUDA reports a useful cause.
-- Documentation contains no command using a flag removed by this substep.
+- Defaults resolve to camera type `opencv`, camera index `0`, device `cpu`, and `fps` `30`.
+- Negative or non-integer camera indexes, non-positive or non-integer FPS values, invalid display dimensions, and devices other than `cpu` or `cuda` fail descriptively.
+- CLI and settings contain no model-path option; each processing type and model size resolves to one configured Ultralytics identifier or target engine reference.
+- A no-argument launch passes through packaged defaults and logs their fully resolved effective values exactly once; required fields such as device, FPS, YOLO origin, and selected model are never logged as `None`.
+- Configuration-file and CLI overrides produce the same startup fields with their effective overridden values, while an omitted log path is reported as the `console` destination and disabled display is reported explicitly.
+- A requested unavailable CUDA device reports a useful cause without falling back to CPU.
+- Existing detection runs remain usable after the CLI migration, including laptop camera index `0` in headless and display modes.
 
-### Step 6f: Semantic segmentation
+### Step 6f: Model-specific input sizing and frame-rate limiting
+
+#### Files
+
+- `src/uav_vision/config/defaults/yolo.json`
+- `src/uav_vision/config/models.py`
+- `src/uav_vision/config/settings.py`
+- `src/uav_vision/inference/ultralytics.py`
+- later mode-specific inference adapters under `src/uav_vision/inference/`
+- `src/uav_vision/pipeline.py`
+- `src/uav_vision/app.py`
+- model-resolution, inference, pipeline, and application tests under `tests/`
+
+#### Work
+
+- Store an explicit inference input size with every processing-type and model-size entry in the YOLO configuration; model resolution returns the model identifier and its input size as one validated selection.
+- Extend the startup configuration record with the resolved model input size so the logged model identifier and dimensions always describe the inference call that will run.
+- Always pass the resolved input size to Ultralytics for every inference call. Do not rely on one global size or on the provider's implicit default.
+- Let the inference adapter perform the provider-supported resize or letterbox operation and return detections, masks, or depth aligned with the application frame contract; display dimensions remain independent from inference dimensions.
+- Apply the configured FPS as an upper bound on completed processing iterations using a monotonic clock and an injected wait/clock boundary that can be tested without real delays.
+- Define one iteration as inference followed by mandatory logging and, when enabled, display output. Wait only for the unused part of the `1 / fps` period; when work already exceeds the period, continue immediately without overlapping iterations or accumulating delay.
+- In headless mode, cap inference plus logging. With display enabled, cap inference plus logging plus display using the same scheduler; do not create separate output rates.
+- Keep stop requests, end-of-stream, interruptions, failures, and cleanup responsive and preserve the existing timing ownership used by debug diagnostics.
+
+#### Verification
+
+- Every configured processing-type/model-size pair resolves both a model identifier and a positive supported input size.
+- The startup record contains that resolved input size and never reports a different size from the one passed to inference.
+- Inference calls receive the selected model's input size for consecutive frames and for models with different configured sizes.
+- Results remain aligned with the source frame while optional display independently uses its configured width and height.
+- A default run uses 30 FPS, an explicit positive integer overrides it, and invalid values fail during configuration.
+- Deterministic clock tests prove that fast iterations wait for the remainder, slow iterations do not wait, and deadlines do not accumulate drift.
+- Headless tests include inference and logging inside the capped iteration; display tests additionally include display work inside the same cap.
+- Shutdown and cleanup do not wait for an unnecessary next-frame deadline.
+
+### Step 6g: Semantic segmentation
 
 #### Files
 
@@ -396,7 +446,7 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 - The logged class count means unique classes present in the frame, not instances or total model classes.
 - Headless mode never imports display resources, and display does not mutate source data.
 
-### Step 6g: Monocular depth estimation
+### Step 6h: Monocular depth estimation
 
 #### Files
 
@@ -421,7 +471,7 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 - Logger statistics match the retained depth map and display normalisation handles degenerate ranges.
 - Headless and display paths consume the same `DepthResult`.
 
-### Step 6h: Integration, compatibility, and documentation refresh
+### Step 6i: Integration, compatibility, and documentation refresh
 
 #### Files
 
@@ -432,8 +482,8 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 
 #### Work
 
-- Document repository structure, installation profiles, configuration precedence, every current flag, all three modes, mandatory logging, and console/file examples.
-- Recheck that the earlier CLI migration removed obsolete public flags from every example and that TensorRT instructions use YOLO configuration.
+- Document repository structure, installation profiles, configuration precedence, grouped CLI help, every current flag, all three modes, mandatory logging, model-specific input sizes, FPS limiting, and console/file examples.
+- Recheck that the earlier CLI migration removed `--model-path` and numeric `--camera-source` from every example, uses `--camera-index` for OpenCV indexes, and keeps TensorRT references in YOLO configuration.
 - Confirm existing capture, inference, cleanup, laptop entry-point, headless, and display behavior remains compatible with the new contracts.
 - Run laptop headless and display smoke tests, then update the pending Step 5b checklist with final commands.
 
@@ -441,9 +491,9 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 
 - `ruff check .`, `ruff format --check .`, full `pytest`, and `uv lock --check` pass.
 - Built and editable installs contain both default configuration files.
-- CLI help matches the README for every processing mode.
+- CLI help and option groups match the README for every processing mode.
 - There are no JSON/JSONL output references or obsolete public flags.
-- Laptop camera index `0` processes frames in headless and display modes with the mandatory logger.
+- Laptop camera index `0` processes frames in headless and display modes with the mandatory logger, CPU default, resolved model input size, and 30 FPS default cap.
 
 ## Working rule
 

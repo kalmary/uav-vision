@@ -6,6 +6,8 @@ from typing import Optional, Union
 
 import numpy as np
 
+from uav_vision.config.settings import ProcessingType
+
 from .depth import DepthResult
 from .detection import DetectionResult
 from .segmentation import SegmentationResult
@@ -92,6 +94,7 @@ class ProcessedFrame:
     frame: Frame
     result: Result
     diagnostics: ProcessingDiagnostics
+    processing_type: ProcessingType = ProcessingType.DETECTION
 
     def __post_init__(self) -> None:
         if not isinstance(self.frame, Frame):
@@ -100,8 +103,17 @@ class ProcessedFrame:
             self.result, (DetectionResult, SegmentationResult, DepthResult)
         ):
             raise ValueError("Processed frame must contain exactly one result")
+        if not isinstance(self.processing_type, ProcessingType):
+            raise ValueError("Processed frame processing type is invalid")
         if not isinstance(self.diagnostics, ProcessingDiagnostics):
             raise ValueError("Processed frame must contain diagnostics")
+        expected_result_type = {
+            ProcessingType.DETECTION: DetectionResult,
+            ProcessingType.SEGMENTATION: SegmentationResult,
+            ProcessingType.DEPTH: DepthResult,
+        }[self.processing_type]
+        if not isinstance(self.result, expected_result_type):
+            raise ValueError("Processed frame result does not match processing type")
         if isinstance(self.result, SegmentationResult):
             result_height, result_width = self.result.class_map.shape
         elif isinstance(self.result, DepthResult):

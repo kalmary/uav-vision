@@ -8,8 +8,7 @@
   },
   "inference": {
     "model_size": "nano",
-    "model_path": null,
-    "device": null
+    "device": "cpu"
   },
   "display": {
     "enabled": false,
@@ -18,5 +17,6 @@
   },
   "log_level": "basic",
   "log_path": null,
+  "fps": 30,
   "yolo_config_path": "yolo.json"
 }

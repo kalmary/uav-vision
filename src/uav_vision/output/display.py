@@ -36,7 +36,10 @@ class DisplayOutput:
             self._backend.rectangle(annotated, start, end, (0, 255, 0), 2)
             self._backend.putText(
                 annotated,
-                detection.class_name,
+                "{0} {1:.2f}".format(
+                    detection.class_name,
+                    detection.confidence,
+                ),
                 (start[0], max(start[1] - 10, 0)),
                 self._backend.FONT_HERSHEY_SIMPLEX,
                 0.5,

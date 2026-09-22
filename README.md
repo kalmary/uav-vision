@@ -37,20 +37,13 @@ system asks. `uav-vision-usb` differs from `uav-vision` only by defaulting to
 the OpenCV camera at index `0`; the equivalent explicit command is:
 
 ```sh
-uv run --extra desktop uav-vision --camera-type opencv --camera-source 0
+uv run --extra desktop uav-vision --camera-type opencv --camera-index 0
 ```
 
 Choose a different built-in model size with `--model-size`:
 
 ```sh
 uv run --extra desktop uav-vision-usb --model-size small
-```
-
-Use `--model-path` for a specific model file. It cannot be combined with
-`--model-size`:
-
-```sh
-uv run --extra desktop uav-vision-usb --model-path path/to/model.pt
 ```
 
 TensorRT engines are tied to their target hardware and runtime. Build and use

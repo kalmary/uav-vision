@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
+from uav_vision.config.settings import ProcessingType
 from uav_vision.domain import (
     DepthResult,
     DetectionResult,
@@ -259,21 +260,28 @@ def test_pipeline_attaches_its_capture_and_processing_measurements():
 
 
 @pytest.mark.parametrize(
-    "result",
+    "processing_type,result",
     [
-        SegmentationResult(
-            np.zeros((12, 16), dtype=np.uint8),
-            (SegmentationClass(0, "background"),),
+        (
+            ProcessingType.SEGMENTATION,
+            SegmentationResult(
+                np.zeros((12, 16), dtype=np.uint8),
+                (SegmentationClass(0, "background"),),
+            ),
         ),
-        DepthResult(np.ones((12, 16), dtype=np.float32), "metre", 0.001),
+        (
+            ProcessingType.DEPTH,
+            DepthResult(np.ones((12, 16), dtype=np.float32), "metre", 0.001),
+        ),
     ],
 )
-def test_pipeline_delivers_each_non_detection_result_variant(result):
+def test_pipeline_delivers_each_non_detection_result_variant(processing_type, result):
     input_frame = frame(1)
     processed = ProcessedFrame(
         input_frame,
         result,
         ProcessingDiagnostics(None, 0.0, None, 1, 1),
+        processing_type,
     )
     output = OutputDouble()
 

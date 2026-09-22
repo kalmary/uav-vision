@@ -37,3 +37,6 @@ required working arguments for camera:
 
 - device should take cuda or cpu strings as input. cpu is default
 - no model path is necessary - we just choose which model to use based on processing type and model-size - its enough to download specific model/ use specific cached one
+- still some cli args are missing/ are not groupped well - example display height/ width
+- make sure input frame size is adjusted ALWAYS for the choosen model (not always the same)
+- add to cli fps (int) value with default 30. speed of inference + display + logging is limited to this value. if no --display is set, just inference+ logging is limited.

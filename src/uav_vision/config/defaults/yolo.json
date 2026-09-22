@@ -5,5 +5,10 @@
     "medium": "yolo26m.pt",
     "large": "yolo26l.pt",
     "xlarge": "yolo26x.pt"
+  },
+  "detection_filters": {
+    "selected_classes": [],
+    "minimum_confidence": 0.0,
+    "top_k": null
   }
 }

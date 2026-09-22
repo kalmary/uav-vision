@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from importlib import resources
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -8,6 +9,7 @@ from uav_vision.config.settings import (
     AppSettings,
     CameraType,
     CaptureSettings,
+    DetectionFilterSettings,
     DisplaySettings,
     InferenceSettings,
     LogLevel,
@@ -18,6 +20,14 @@ from uav_vision.config.settings import (
 )
 
 _DEFAULTS_PACKAGE = "uav_vision.config.defaults"
+
+
+def cuda_available() -> bool:
+    try:
+        import torch
+    except ImportError:
+        return False
+    return bool(torch.cuda.is_available())
 
 
 def _parse_json(text: str, origin: str) -> Mapping[str, Any]:
@@ -125,15 +135,14 @@ def _app_settings(values: Mapping[str, Any], yolo: YoloSettings) -> AppSettings:
         processing = ProcessingSettings(
             ProcessingType(processing_values["processing_type"])
         )
-        model_size_value = inference_values["model_size"]
-        model_size = None if model_size_value is None else ModelSize(model_size_value)
-        model_path_value = inference_values["model_path"]
-        model_path = None if model_path_value is None else Path(model_path_value)
         inference = InferenceSettings(
-            model_size, model_path, inference_values["device"]
+            ModelSize(inference_values["model_size"]), inference_values["device"]
         )
-        display = DisplaySettings(display_values["width"], display_values["height"])
+        display = DisplaySettings(
+            display_values["width"], display_values["height"], display_values["enabled"]
+        )
         log_level = LogLevel(values["log_level"])
+        fps = values["fps"]
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(
             "Invalid application configuration: {}".format(error)
@@ -152,9 +161,10 @@ def _app_settings(values: Mapping[str, Any], yolo: YoloSettings) -> AppSettings:
         capture,
         processing,
         inference,
-        display if display_values["enabled"] else None,
+        display,
         logging,
         yolo,
+        fps,
     )
 
 
@@ -164,16 +174,34 @@ def _yolo_settings(
     models = {}
     try:
         for processing_name, model_values in values.items():
+            if processing_name == "detection_filters":
+                continue
             if not isinstance(model_values, dict):
                 raise ValueError("YOLO mode mappings must be objects")
             processing_type = ProcessingType(processing_name)
             models[processing_type] = {
-                ModelSize(model_size): model_path
-                for model_size, model_path in model_values.items()
+                ModelSize(model_size): model_identifier
+                for model_size, model_identifier in model_values.items()
             }
     except (TypeError, ValueError) as error:
         raise ValueError("Invalid YOLO configuration: {}".format(error)) from error
-    return YoloSettings(path, origin, models)
+    filter_values = values.get("detection_filters", {})
+    if not isinstance(filter_values, dict):
+        raise ValueError(
+            "Invalid YOLO configuration: detection filters must be an object"
+        )
+    try:
+        selected_classes = filter_values.get("selected_classes", [])
+        if not isinstance(selected_classes, list):
+            raise ValueError("selected classes must be an array")
+        filters = DetectionFilterSettings(
+            tuple(selected_classes),
+            filter_values.get("minimum_confidence", 0.0),
+            filter_values.get("top_k"),
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("Invalid YOLO configuration: {}".format(error)) from error
+    return YoloSettings(path, origin, models, filters)
 
 
 def _validate_app_layer(
@@ -188,9 +216,134 @@ def _validate_app_layer(
         raise ValueError("Invalid {}: {}".format(context, error)) from error
 
 
+def _validate_resolved(
+    settings: AppSettings, validate_model: bool, check_cuda: bool
+) -> AppSettings:
+    if validate_model:
+        try:
+            settings.model_identifier
+        except ValueError as error:
+            raise ValueError(
+                "Invalid resolved configuration: {}".format(error)
+            ) from error
+    if check_cuda and settings.inference.device == "cuda" and not cuda_available():
+        raise ValueError("CUDA device is unavailable")
+    return settings
+
+
+def _override_mapping(
+    values: Mapping[str, Any], name: str, keys: set
+) -> Mapping[str, Any]:
+    if not isinstance(values, Mapping):
+        raise ValueError("{} overrides must be an object".format(name))
+    unknown = set(values) - keys
+    if unknown:
+        raise ValueError("Unknown {} override: {}".format(name, sorted(unknown)[0]))
+    return values
+
+
+def apply_overrides(
+    settings: AppSettings,
+    overrides: Optional[Mapping[str, Any]] = None,
+    yolo_overrides: Optional[Mapping[str, Any]] = None,
+) -> AppSettings:
+    if not isinstance(settings, AppSettings):
+        raise ValueError("base settings are invalid")
+    values = {} if overrides is None else _override_mapping(
+        overrides,
+        "configuration",
+        {
+            "capture",
+            "processing",
+            "inference",
+            "display",
+            "log_level",
+            "log_path",
+            "fps",
+        },
+    )
+    try:
+        capture_values = _override_mapping(
+            values.get("capture", {}), "capture", {"camera_type", "source"}
+        )
+        capture = CaptureSettings(
+            CameraType(capture_values.get("camera_type", settings.capture.camera_type)),
+            capture_values.get("source", settings.capture.source),
+        )
+        processing_values = _override_mapping(
+            values.get("processing", {}), "processing", {"processing_type"}
+        )
+        processing = ProcessingSettings(
+            ProcessingType(
+                processing_values.get(
+                    "processing_type", settings.processing.processing_type
+                )
+            )
+        )
+        inference_values = _override_mapping(
+            values.get("inference", {}), "inference", {"model_size", "device"}
+        )
+        inference = InferenceSettings(
+            ModelSize(inference_values.get("model_size", settings.inference.model_size)),
+            inference_values.get("device", settings.inference.device),
+        )
+        display_values = _override_mapping(
+            values.get("display", {}), "display", {"enabled", "width", "height"}
+        )
+        display = DisplaySettings(
+            display_values.get("width", settings.display.width),
+            display_values.get("height", settings.display.height),
+            display_values.get("enabled", settings.display.enabled),
+        )
+        level = LogLevel(values.get("log_level", settings.logging.level))
+        path_value = values.get("log_path", settings.logging.path)
+        logging = LogSettings(level, None if path_value is None else Path(path_value))
+        resolved = replace(
+            settings,
+            capture=capture,
+            processing=processing,
+            inference=inference,
+            display=display,
+            logging=logging,
+            fps=values.get("fps", settings.fps),
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("Invalid explicit overrides: {}".format(error)) from error
+
+    if yolo_overrides is not None:
+        values = _override_mapping(yolo_overrides, "YOLO", {"detection_filters"})
+        filter_values = _override_mapping(
+            values.get("detection_filters", {}),
+            "detection filter",
+            {"selected_classes", "minimum_confidence", "top_k"},
+        )
+        filters = resolved.yolo.detection_filters
+        try:
+            filters = DetectionFilterSettings(
+                tuple(filter_values.get("selected_classes", filters.selected_classes)),
+                filter_values.get("minimum_confidence", filters.minimum_confidence),
+                filter_values.get("top_k", filters.top_k),
+            )
+        except (TypeError, ValueError) as error:
+            raise ValueError("Invalid explicit YOLO overrides: {}".format(error)) from error
+        resolved = replace(
+            resolved,
+            yolo=YoloSettings(
+                resolved.yolo.path,
+                resolved.yolo.origin,
+                resolved.yolo.models,
+                filters,
+            ),
+        )
+    return _validate_resolved(resolved, validate_model=True, check_cuda=True)
+
+
 def load_settings(
     config_path: Optional[Path] = None,
     overrides: Optional[Mapping[str, Any]] = None,
+    yolo_overrides: Optional[Mapping[str, Any]] = None,
+    validate_model: bool = True,
+    check_cuda: bool = True,
 ) -> AppSettings:
     app_defaults = _read_packaged_json("app.json")
     yolo_resource = _packaged_resource_name(app_defaults.get("yolo_config_path"))
@@ -216,15 +369,35 @@ def load_settings(
         app_values = _merge(app_values, overrides, "explicit overrides")
 
     if overrides is not None and "yolo_config_path" in overrides:
-        yolo_directory = Path.cwd()
+        yolo_path = _resolve_path(
+            app_values["yolo_config_path"], Path.cwd(), "YOLO configuration path"
+        )
     elif "yolo_config_path" in user_values:
-        yolo_directory = selected_path.parent
+        yolo_path = _resolve_path(
+            app_values["yolo_config_path"],
+            selected_path.parent,
+            "YOLO configuration path",
+        )
     else:
-        return _app_settings(app_values, default_yolo)
-    yolo_path = _resolve_path(
-        app_values["yolo_config_path"], yolo_directory, "YOLO configuration path"
-    )
-    yolo_values = _merge(yolo_defaults, _read_json(yolo_path), str(yolo_path))
-    return _app_settings(
-        app_values, _yolo_settings(yolo_path, str(yolo_path), yolo_values)
+        yolo_path = None
+
+    if yolo_path is None:
+        yolo_values = dict(yolo_defaults)
+        yolo = default_yolo
+    else:
+        yolo_values = _merge(yolo_defaults, _read_json(yolo_path), str(yolo_path))
+        yolo = _yolo_settings(yolo_path, str(yolo_path), yolo_values)
+
+    if yolo_overrides is not None:
+        if not isinstance(yolo_overrides, Mapping):
+            raise ValueError("YOLO overrides must be a mapping")
+        yolo_values = _merge(yolo_values, yolo_overrides, "explicit YOLO overrides")
+        yolo = _yolo_settings(
+            yolo.path,
+            yolo.origin,
+            yolo_values,
+        )
+
+    return _validate_resolved(
+        _app_settings(app_values, yolo), validate_model, check_cuda
     )
