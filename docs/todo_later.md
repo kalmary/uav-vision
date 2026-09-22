@@ -46,3 +46,18 @@ required working arguments for camera:
 - existing tests should be modified to reflect requested modifications. building completely new tests to reflect changes on existing codebase as "test for change x" is suboptimal.
 - if hardware cannot handle the requested fps, it should be limited to the hardware's maximum. if fps is 0 (manually), fps should be limited to the hardware's maximum.
 - fps info should be displayed on screen (when --display, and always for logger)
+- add licence in readme - this project is under mit, but ultralytics yolo not.
+- change install and use guide in readme:
+  - divide it into install by uv sync with proper flags (explain what they do)
+  - explain usage in later section, with clear distinction between modes (there are 2 entry points)
+-   --no-display - this flag is unecessary, if --display is not set, the display is not used (default)
+- this could be configured better for help. current format suggests that all of those options work for every yolo mode - most is for detection.
+```
+processing/inference:
+  --processing-type {detection,segmentation,depth}
+  --model-size {nano,small,medium,large,xlarge}
+  --device {cpu,cuda}
+  --selected-classes SELECTED_CLASSES [SELECTED_CLASSES ...]
+  --minimum-confidence MINIMUM_CONFIDENCE
+  --top-k TOP_K
+``` 
