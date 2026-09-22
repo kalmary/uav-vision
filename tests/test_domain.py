@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
+from uav_vision.config.settings import ProcessingType
 from uav_vision.domain import (
     BoundingBox,
     DepthResult,
@@ -219,15 +220,24 @@ def test_depth_result_rejects_invalid_scale(scale):
 
 
 @pytest.mark.parametrize(
-    "result",
+    "processing_type,result",
     [
-        SegmentationResult(
-            np.zeros((7, 8), dtype=np.uint8), (SegmentationClass(0, "background"),)
+        (
+            ProcessingType.SEGMENTATION,
+            SegmentationResult(
+                np.zeros((7, 8), dtype=np.uint8),
+                (SegmentationClass(0, "background"),),
+            ),
         ),
-        DepthResult(np.ones((7, 8), dtype=np.float32), "metre", 1.0),
+        (
+            ProcessingType.DEPTH,
+            DepthResult(np.ones((7, 8), dtype=np.float32), "metre", 1.0),
+        ),
     ],
 )
-def test_processed_frame_rejects_result_dimensions_that_do_not_match_its_frame(result):
+def test_processed_frame_rejects_result_dimensions_that_do_not_match_its_frame(
+    processing_type, result
+):
     frame = Frame(
         image=np.zeros((8, 8, 3), dtype=np.uint8),
         sequence=0,
@@ -235,7 +245,7 @@ def test_processed_frame_rejects_result_dimensions_that_do_not_match_its_frame(r
     )
 
     with pytest.raises(ValueError, match="dimensions"):
-        ProcessedFrame(frame, result, diagnostics())
+        ProcessedFrame(frame, result, diagnostics(), processing_type)
 
 
 def test_processed_frame_accepts_each_result_variant_with_matching_dimensions():
@@ -249,8 +259,58 @@ def test_processed_frame_accepts_each_result_variant_with_matching_dimensions():
     )
     depth = DepthResult(np.ones((8, 8), dtype=np.float32), "metre", 0.001)
 
-    assert ProcessedFrame(frame, segmentation, diagnostics()).result is segmentation
-    assert ProcessedFrame(frame, depth, diagnostics()).result is depth
+    assert (
+        ProcessedFrame(
+            frame,
+            segmentation,
+            diagnostics(),
+            processing_type=ProcessingType.SEGMENTATION,
+        ).result
+        is segmentation
+    )
+    assert (
+        ProcessedFrame(
+            frame,
+            depth,
+            diagnostics(),
+            processing_type=ProcessingType.DEPTH,
+        ).result
+        is depth
+    )
+
+
+@pytest.mark.parametrize(
+    ("processing_type", "result"),
+    [
+        (
+            ProcessingType.DETECTION,
+            SegmentationResult(
+                np.zeros((8, 8), dtype=np.uint8),
+                (SegmentationClass(0, "background"),),
+            ),
+        ),
+        (
+            ProcessingType.DETECTION,
+            DepthResult(np.ones((8, 8), dtype=np.float32), "metre", 0.001),
+        ),
+    ],
+)
+def test_processed_frame_rejects_a_result_for_a_different_processing_type(
+    processing_type, result
+):
+    frame = Frame(
+        image=np.zeros((8, 8, 3), dtype=np.uint8),
+        sequence=0,
+        captured_at=datetime.now(timezone.utc),
+    )
+
+    with pytest.raises(ValueError, match="processing type"):
+        ProcessedFrame(
+            frame,
+            result,
+            diagnostics(),
+            processing_type=processing_type,
+        )
 
 
 @pytest.mark.parametrize(

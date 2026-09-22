@@ -9,6 +9,7 @@ The Rust implementation was removed. The project is planned as a modular Python 
 | 3. Replaceable YOLO Inference and Processing Mode | Complete |
 | 4. Headless Pipeline, Outputs, and Entry Points | Implemented; live camera/display smoke tests pending |
 | 5. Jetson Nano Deployment and Validation | Prepared locally; Jetson hardware validation pending |
+| 6. Configuration, Processing Modes, and Mandatory Logging | 6a–6c complete; 6d–6i pending |
 
 ## Current decisions
 
@@ -18,15 +19,10 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Laptop and USB cameras receive a dedicated entry point backed by the shared pipeline.
 - Jetson acceleration uses an Ultralytics-compatible TensorRT engine validated on the target device.
 - Ultralytics, NumPy, and platform-appropriate OpenCV builds are the initial runtime packages; pytest, pytest-cov, Ruff, setuptools, wheel, and uv support development.
-- Headless capture and inference remain independent from optional display behavior; filtered result logging is planned separately.
+- Headless capture and inference remain independent from optional display behavior; mandatory basic/debug logging is implemented, with mode-specific result formatting pending.
 
 ## Work Log
 
-- Define the project task — documented the Jetson Nano UAV camera, YOLO detection, optional display, and CLI requirements in `AGENTS.md`.
-- Test the working setup — checked the repository workflow without adding a project change.
-- Expand agent guidance — added model-tier selection and agent-workflow rules to `AGENTS.md`.
-- Plan the architecture — created the Rust project structure with responsibility, input, and output descriptions for scaffold files.
-- Recheck repository instructions — aligned the planned architecture with the repository module and engineering rules.
 - Build the planned scaffold — added the requested folders and initial Rust files.
 - Keep the solution Rust-only — selected a Rust-native capture and inference direction in the workplan.
 - Divide implementation into steps — structured the project into five independently testable stages.
@@ -67,3 +63,6 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Audit Step 6 quality — confirmed broad guideline compliance and identified sequencing and contract gaps to correct before implementation.
 - Correct Step 6 sequencing — reordered contracts, logging, filtering, CLI migration, and mode work while defining diagnostics ownership.
 - Resolve test type warnings — narrowed optional display settings and locally suppressed intentional invalid-argument cases.
+- Complete the Step 6c review — verified exception preservation and traceback credential redaction, then completed the 6a–6c integration checks.
+- Refine the remaining workplan — specified grouped camera/device/model/display/FPS CLI contracts, model-specific inference sizing, and logically ordered Steps 6e–6i without changing code.
+- Correct startup-reporting requirements — required every entry point to resolve packaged defaults and the selected YOLO model before logging the complete effective configuration.

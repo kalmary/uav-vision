@@ -63,22 +63,22 @@ def test_usb_entrypoint_uses_usb_defaults_and_keeps_cli_overrides(monkeypatch):
         usb_camera.main(
             [
                 "--camera-type",
-                "gstreamer",
-                "--camera-source",
-                "camera ! appsink",
+                "opencv",
+                "--camera-index",
+                "3",
                 "--model-size",
                 "small",
                 "--display",
                 "--device",
-                "cuda:0",
+                "cpu",
             ]
         )
         == 0
     )
-    assert values[1].capture.camera_type is CameraType.GSTREAMER
-    assert values[1].capture.source == "camera ! appsink"
-    assert values[1].inference.device == "cuda:0"
-    assert values[1].display is not None
+    assert values[1].capture.camera_type is CameraType.OPENCV
+    assert values[1].capture.source == 3
+    assert values[1].inference.device == "cpu"
+    assert values[1].display.enabled is True
 
 
 def test_entrypoint_help_does_not_run_app(monkeypatch, capsys):

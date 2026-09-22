@@ -1,12 +1,11 @@
 import math
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-from uav_vision.config.models import ModelSize, model_path_for
+from uav_vision.config.models import ModelSize
 from uav_vision.config.settings import InferenceSettings
 from uav_vision.domain import Frame
 from uav_vision.inference import (
@@ -68,7 +67,7 @@ def frame():
     )
 
 
-def settings(device=None):
+def settings(device="cpu"):
     return InferenceSettings(model_size=ModelSize.NANO, device=device)
 
 
@@ -90,6 +89,7 @@ def test_segmentation_and_depth_protocols_are_structurally_implemented():
 def make_detector(model, detector_settings=None):
     return UltralyticsDetector(
         detector_settings or settings(),
+        "yolo26n.pt",
         model_factory=lambda path, task: model,
     )
 
@@ -100,30 +100,16 @@ def test_ultralytics_detector_structurally_implements_detector():
     assert isinstance(detector, Detector)
 
 
-@pytest.mark.parametrize("model_size", list(ModelSize))
-def test_model_size_uses_central_model_path_mapping(model_size):
+def test_detector_loads_the_resolved_model_identifier():
     calls = []
-    detector_settings = InferenceSettings(model_size=model_size)
 
     UltralyticsDetector(
-        detector_settings,
+        InferenceSettings(),
+        "cached-detector.engine",
         model_factory=lambda path, task: calls.append((path, task)) or Model(),
     )
 
-    assert calls == [(model_path_for(model_size), "detect")]
-
-
-@pytest.mark.parametrize("model_path", [Path("custom.pt"), Path("custom.engine")])
-def test_explicit_model_path_bypasses_model_size_alias(model_path):
-    calls = []
-    detector_settings = InferenceSettings(model_size=None, model_path=model_path)
-
-    UltralyticsDetector(
-        detector_settings,
-        model_factory=lambda path, task: calls.append((path, task)) or Model(),
-    )
-
-    assert calls == [(str(model_path), "detect")]
+    assert calls == [("cached-detector.engine", "detect")]
 
 
 def test_model_is_loaded_once_during_initialization():
@@ -131,34 +117,37 @@ def test_model_is_loaded_once_during_initialization():
     model = Model([Result(Boxes([], [], []), {})])
     detector = UltralyticsDetector(
         settings(),
+        "yolo26n.pt",
         model_factory=lambda path, task: calls.append((path, task)) or model,
     )
 
     detector.detect(frame())
     detector.detect(frame())
 
-    assert calls == [(model_path_for(ModelSize.NANO), "detect")]
+    assert calls == [("yolo26n.pt", "detect")]
 
 
 def test_detect_passes_the_frame_bgr_image_and_explicit_device():
     model = Model([Result(Boxes([], [], []), {})])
-    detector = make_detector(model, settings(device="cuda:0"))
+    detector = make_detector(model, settings(device="cuda"))
     input_frame = frame()
 
     assert detector.detect(input_frame) == ()
     assert model.calls == [
-        {"source": input_frame.image, "verbose": False, "device": "cuda:0"}
+        {"source": input_frame.image, "verbose": False, "device": "cuda"}
     ]
 
 
-def test_detect_omits_device_when_it_is_not_selected():
+def test_detect_passes_the_cpu_device():
     model = Model([Result(Boxes([], [], []), {})])
     detector = make_detector(model)
     input_frame = frame()
 
     detector.detect(input_frame)
 
-    assert model.calls == [{"source": input_frame.image, "verbose": False}]
+    assert model.calls == [
+        {"source": input_frame.image, "verbose": False, "device": "cpu"}
+    ]
 
 
 def test_detect_returns_no_detections_for_empty_boxes():
@@ -348,6 +337,7 @@ def test_initialization_wraps_model_factory_errors_with_their_cause():
     with pytest.raises(InferenceInitializationError) as raised:
         UltralyticsDetector(
             settings(),
+            "yolo26n.pt",
             model_factory=lambda path, task: (_ for _ in ()).throw(error),
         )
 
@@ -358,7 +348,7 @@ def test_initialization_wraps_missing_ultralytics_import(monkeypatch):
     monkeypatch.setitem(sys.modules, "ultralytics", None)
 
     with pytest.raises(InferenceInitializationError) as raised:
-        UltralyticsDetector(settings())
+        UltralyticsDetector(settings(), "yolo26n.pt")
 
     assert isinstance(raised.value.__cause__, ImportError)
 

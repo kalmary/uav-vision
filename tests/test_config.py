@@ -1,108 +1,77 @@
-from pathlib import Path
-
 import pytest
 
-from uav_vision.config.models import ModelSize, model_path_for
+from uav_vision.config.models import ModelSize
 from uav_vision.config.settings import (
     AppSettings,
     CameraType,
     CaptureSettings,
+    DetectionFilterSettings,
     DisplaySettings,
     InferenceSettings,
     ProcessingSettings,
-    ProcessingType,
 )
 
 
-def test_default_settings_select_headless_detection_with_the_nano_model():
+def test_default_settings_keep_display_dimensions_when_display_is_disabled():
     settings = AppSettings()
 
-    assert settings.capture.camera_type is CameraType.OPENCV
-    assert settings.capture.source == 0
-    assert settings.processing.processing_type is ProcessingType.DETECTION
-    assert settings.inference.model_size is ModelSize.NANO
-    assert settings.display is None
+    assert settings.capture == CaptureSettings(CameraType.OPENCV, 0)
+    assert settings.inference == InferenceSettings(ModelSize.NANO, "cpu")
+    assert settings.fps == 30
+    assert settings.display == DisplaySettings(1280, 720, False)
 
 
-def test_model_path_for_the_nano_model_is_centralized():
-    assert model_path_for(ModelSize.NANO) == "yolo26n.pt"
-
-
-@pytest.mark.parametrize(
-    ("size", "path"),
-    [
-        (ModelSize.SMALL, "yolo26s.pt"),
-        (ModelSize.MEDIUM, "yolo26m.pt"),
-        (ModelSize.LARGE, "yolo26l.pt"),
-        (ModelSize.XLARGE, "yolo26x.pt"),
-    ],
-)
-def test_model_path_for_maps_each_supported_model_size(size, path):
-    assert model_path_for(size) == path
-
-
-def test_explicit_model_path_replaces_the_model_size():
-    inference = InferenceSettings(model_size=None, model_path=Path("model.engine"))
-
-    assert inference.model_size is None
-    assert inference.model_path == Path("model.engine")
-
-
-def test_inference_rejects_selecting_a_model_size_and_path_together():
-    with pytest.raises(ValueError, match="either"):
-        InferenceSettings(model_size=ModelSize.NANO, model_path=Path("model.engine"))
-
-
-@pytest.mark.parametrize("model_path", [Path(), Path("   ")])
-def test_inference_rejects_an_empty_model_path(model_path):
-    with pytest.raises(ValueError, match="path"):
-        InferenceSettings(model_size=None, model_path=model_path)
+def test_settings_reject_missing_display_configuration():
+    with pytest.raises(ValueError, match="display settings"):
+        AppSettings(display=None)
 
 
 @pytest.mark.parametrize(
     "dimensions",
-    [(0, 720), (1280, 0), (-1, 720), (640.5, 480), (True, 480)],
+    [
+        (0, 720, False),
+        (-1, 720, False),
+        (640.5, 720, False),
+        (1280, 0, False),
+        (1280, -1, False),
+        (1280, 480.5, False),
+        (640, 480, 1),
+    ],
 )
-def test_display_rejects_non_positive_dimensions(dimensions):
-    with pytest.raises(ValueError, match="positive"):
+def test_display_rejects_invalid_enabled_state_or_dimensions(dimensions):
+    with pytest.raises(ValueError):
         DisplaySettings(*dimensions)
 
 
-@pytest.mark.parametrize("source", ["", "   "])
-def test_capture_rejects_an_empty_camera_source(source):
+@pytest.mark.parametrize("source", ["", "   ", -1])
+def test_capture_rejects_invalid_sources(source):
     with pytest.raises(ValueError, match="source"):
         CaptureSettings(source=source)
 
 
-def test_capture_rejects_a_negative_camera_index():
-    with pytest.raises(ValueError, match="source"):
-        CaptureSettings(source=-1)
-
-
 def test_gstreamer_capture_requires_a_pipeline_string():
     with pytest.raises(ValueError, match="GStreamer"):
-        CaptureSettings(camera_type=CameraType.GSTREAMER, source=0)
+        CaptureSettings(CameraType.GSTREAMER, 0)
 
 
-@pytest.mark.parametrize("device", ["   ", 0])
-def test_inference_rejects_an_invalid_device(device):
+@pytest.mark.parametrize("device", ["cuda:0", "", None, 0])
+def test_inference_accepts_only_cpu_or_cuda(device):
     with pytest.raises(ValueError, match="device"):
         InferenceSettings(device=device)
+
+
+@pytest.mark.parametrize("fps", [0, -1, 1.5, True])
+def test_settings_reject_invalid_fps(fps):
+    with pytest.raises(ValueError, match="fps"):
+        AppSettings(fps=fps)
 
 
 @pytest.mark.parametrize(
     "settings",
     [
-        lambda: CaptureSettings(
-            camera_type="gstreamer",  # pyright: ignore[reportArgumentType]
-            source="pipeline",
-        ),
-        lambda: ProcessingSettings(
-            processing_type="unsupported",  # pyright: ignore[reportArgumentType]
-        ),
-        lambda: InferenceSettings(
-            model_size="nano",  # pyright: ignore[reportArgumentType]
-        ),
+        lambda: CaptureSettings(camera_type="gstreamer", source="pipeline"),
+        lambda: ProcessingSettings(processing_type="unsupported"),
+        lambda: InferenceSettings(model_size="nano"),
     ],
 )
 def test_settings_reject_non_enum_selections(settings):
@@ -110,22 +79,19 @@ def test_settings_reject_non_enum_selections(settings):
         settings()
 
 
-def test_inference_rejects_a_model_path_that_is_not_a_path():
-    with pytest.raises(ValueError, match="path"):
-        InferenceSettings(
-            model_size=None,
-            model_path="model.engine",  # pyright: ignore[reportArgumentType]
-        )
-
-
-def test_settings_keep_capture_processing_inference_and_display_separate():
-    settings = AppSettings(
-        capture=CaptureSettings(camera_type=CameraType.GSTREAMER, source="pipeline"),
-        processing=ProcessingSettings(),
-        inference=InferenceSettings(),
-        display=DisplaySettings(1280, 720),
-    )
-
-    assert settings.capture.source == "pipeline"
-    assert settings.display is not None
-    assert settings.display.width == 1280
+@pytest.mark.parametrize(
+    "settings",
+    [
+        lambda: DetectionFilterSettings(selected_classes=(True,)),
+        lambda: DetectionFilterSettings(selected_classes=(-1,)),
+        lambda: DetectionFilterSettings(minimum_confidence=-0.1),
+        lambda: DetectionFilterSettings(minimum_confidence=1.1),
+        lambda: DetectionFilterSettings(minimum_confidence=True),
+        lambda: DetectionFilterSettings(minimum_confidence=float("nan")),
+        lambda: DetectionFilterSettings(top_k=0),
+        lambda: DetectionFilterSettings(top_k=True),
+    ],
+)
+def test_detection_filter_settings_reject_invalid_values(settings):
+    with pytest.raises(ValueError):
+        settings()

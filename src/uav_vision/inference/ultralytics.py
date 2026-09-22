@@ -2,7 +2,6 @@ import math
 from numbers import Real
 from typing import Any, Callable, Optional, Tuple
 
-from uav_vision.config.models import model_path_for
 from uav_vision.config.settings import InferenceSettings
 from uav_vision.domain import BoundingBox, Detection, Frame
 
@@ -13,10 +12,10 @@ from .base import (
 )
 
 
-def _load_model(model_path: str) -> Any:
+def _load_model(model_identifier: str) -> Any:
     from ultralytics import YOLO
 
-    return YOLO(model_path, task="detect")
+    return YOLO(model_identifier, task="detect")
 
 
 def _tensor_values(tensor: Any) -> list:
@@ -73,19 +72,15 @@ class UltralyticsDetector:
     def __init__(
         self,
         settings: InferenceSettings,
+        model_identifier: str,
         model_factory: Optional[Callable[..., Any]] = None,
     ) -> None:
-        model_path = (
-            str(settings.model_path)
-            if settings.model_path is not None
-            else model_path_for(settings.model_size)
-        )
         self._device = settings.device
         try:
             self._model = (
-                model_factory(model_path, task="detect")
+                model_factory(model_identifier, task="detect")
                 if model_factory is not None
-                else _load_model(model_path)
+                else _load_model(model_identifier)
             )
         except Exception as error:
             raise InferenceInitializationError(
@@ -94,8 +89,7 @@ class UltralyticsDetector:
 
     def detect(self, frame: Frame) -> Tuple[Detection, ...]:
         arguments = {"source": frame.image, "verbose": False}
-        if self._device is not None:
-            arguments["device"] = self._device
+        arguments["device"] = self._device
         try:
             results = self._model.predict(**arguments)
         except Exception as error:

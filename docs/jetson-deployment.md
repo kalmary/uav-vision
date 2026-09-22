@@ -88,12 +88,26 @@ copying an engine made on a laptop or another Jetson:
 yolo export model=yolo26n.pt format=engine device=0
 ```
 
-Keep the resulting `yolo26n.engine` beside the application or pass its full
-path with `--model-path`. The application selects the engine explicitly and
-passes `--device 0` to Ultralytics for inference:
+Keep the resulting `yolo26n.engine` beside a user configuration file. The
+application resolves model identifiers from the YOLO configuration rather than
+accepting a model path on the command line. For example, create
+`jetson-yolo.json`:
+
+```json
+{"detection": {"nano": "yolo26n.engine"}}
+```
+
+Then reference it from `jetson-app.json` and select CUDA explicitly:
+
+```json
+{
+  "inference": {"model_size": "nano", "device": "cuda"},
+  "yolo_config_path": "jetson-yolo.json"
+}
+```
 
 ```sh
-uav-vision-usb --model-path yolo26n.engine --device 0
+uav-vision-usb --config-path jetson-app.json
 ```
 
 Do not record GPU acceleration as successful merely because export completed.
@@ -110,14 +124,13 @@ in its [Jetson guide](https://docs.ultralytics.com/guides/nvidia-jetson/) and
 Run headlessly with a USB camera at index `0`:
 
 ```sh
-uav-vision-usb --model-path yolo26n.engine --device 0
+uav-vision-usb --config-path jetson-app.json
 ```
 
 The equivalent command with an explicit OpenCV source is:
 
 ```sh
-uav-vision --camera-type opencv --camera-source 0 \
-    --model-path yolo26n.engine --device 0
+uav-vision --camera-type opencv --camera-index 0 --config-path jetson-app.json
 ```
 
 ### CSI camera through GStreamer
@@ -125,13 +138,24 @@ uav-vision --camera-type opencv --camera-source 0 \
 The following is an unverified starting pipeline for a supported CSI camera in
 the native or custom environment that preserves Jetson OpenCV with GStreamer.
 It is not expected to work in the stock headless container. The pipeline
-belongs in the CLI argument rather than application code because sensor,
+belongs in user configuration rather than application code because sensor,
 resolution, and carrier-board settings vary.
 
+```json
+{
+  "capture": {
+    "camera_type": "gstreamer",
+    "source": "nvarguscamerasrc sensor-id=0 ! video/x-raw(memory:NVMM),width=1280,height=720,format=NV12,framerate=30/1 ! nvvidconv ! video/x-raw,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink drop=true max-buffers=1 sync=false"
+  },
+  "inference": {"device": "cuda"},
+  "yolo_config_path": "jetson-yolo.json"
+}
+```
+
+Save this as `jetson-csi.json` beside `jetson-yolo.json`, then run:
+
 ```sh
-CSI_PIPELINE='nvarguscamerasrc sensor-id=0 ! video/x-raw(memory:NVMM),width=1280,height=720,format=NV12,framerate=30/1 ! nvvidconv ! video/x-raw,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink drop=true max-buffers=1 sync=false'
-uav-vision --camera-type gstreamer --camera-source "$CSI_PIPELINE" \
-    --model-path yolo26n.engine --device 0
+uav-vision --config-path jetson-csi.json
 ```
 
 Confirm camera discovery and this pipeline with the Jetson's native tools
@@ -145,7 +169,7 @@ environment, on a Jetson local graphical session with a GUI-capable OpenCV
 build, add the same display options used on a laptop:
 
 ```sh
-uav-vision-usb --model-path yolo26n.engine --device 0 \
+uav-vision-usb --config-path jetson-app.json \
     --display --display-width 1280 --display-height 720
 ```
 
@@ -166,7 +190,7 @@ tegrastats --interval 1000 --logfile tegrastats.log
 Run headless inference separately:
 
 ```sh
-uav-vision-usb --model-path yolo26n.engine --device 0
+uav-vision-usb --config-path jetson-app.json
 ```
 
 `tegrastats` supplies GPU utilisation, memory, swap, power, and thermal data; it

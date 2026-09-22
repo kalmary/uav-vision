@@ -12,6 +12,7 @@ from uav_vision.config.loader import load_settings
 from uav_vision.config.models import ModelSize
 from uav_vision.config.settings import (
     AppSettings,
+    DetectionFilterSettings,
     LogLevel,
     LogSettings,
     ProcessingType,
@@ -57,8 +58,7 @@ def test_complete_user_configuration_replaces_packaged_defaults(tmp_path):
                 "processing": {"processing_type": "detection"},
                 "inference": {
                     "model_size": "small",
-                    "model_path": None,
-                    "device": "cuda:0",
+                    "device": "cpu",
                 },
                 "display": {"enabled": True, "width": 960, "height": 540},
                 "log_level": "debug",
@@ -73,7 +73,7 @@ def test_complete_user_configuration_replaces_packaged_defaults(tmp_path):
 
     assert settings.capture.source == 4
     assert settings.inference.model_size is ModelSize.SMALL
-    assert settings.inference.device == "cuda:0"
+    assert settings.inference.device == "cpu"
     assert settings.display is not None
     assert settings.display.width == 960
     assert settings.display.height == 540
@@ -180,6 +180,31 @@ def test_loaded_yolo_model_mappings_are_immutable():
         settings.yolo.models[ProcessingType.DETECTION][ModelSize.NANO] = "other.pt"
 
 
+def test_yolo_detection_filters_are_loaded_as_immutable_settings(tmp_path):
+    yolo_path = tmp_path / "models.json"
+    yolo_path.write_text(
+        json.dumps(
+            {
+                "detection_filters": {
+                    "selected_classes": [2, 5],
+                    "minimum_confidence": 0.6,
+                    "top_k": 3,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "app.json"
+    config_path.write_text(
+        json.dumps({"yolo_config_path": "models.json"}), encoding="utf-8"
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.yolo is not None
+    assert settings.yolo.detection_filters == DetectionFilterSettings((2, 5), 0.6, 3)
+
+
 def test_packaged_defaults_are_read_without_a_temporary_resource_path(monkeypatch):
     def unexpected_resource_path(*args, **kwargs):
         raise AssertionError("loader must not expose a temporary resource path")
@@ -191,6 +216,7 @@ def test_packaged_defaults_are_read_without_a_temporary_resource_path(monkeypatc
     assert settings.yolo is not None
     assert settings.yolo.path is None
     assert settings.yolo.origin == "package:uav_vision.config.defaults/yolo.json"
+    assert settings.yolo.detection_filters == DetectionFilterSettings()
 
 
 def test_packaged_app_yolo_path_selects_the_named_packaged_configuration(
