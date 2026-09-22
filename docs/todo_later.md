@@ -39,4 +39,10 @@ required working arguments for camera:
 - no model path is necessary - we just choose which model to use based on processing type and model-size - its enough to download specific model/ use specific cached one
 - still some cli args are missing/ are not groupped well - example display height/ width
 - make sure input frame size is adjusted ALWAYS for the choosen model (not always the same)
-- add to cli fps (int) value with default 30. speed of inference + display + logging is limited to this value. if no --display is set, just inference+ logging is limited.
+- add to cli fps (int) value with default 30. speed of inference + display + logging is limited to this value. if no --display is set, just inference+ logging is limited. if hardware cannot handle the requested fps, it should be limited to the hardware's maximum. if fps is 0 (manually), fps should be limited to the hardware's maximum.
+
+
+- frame sequence isnt necessary info and it can be cause of int overflow.
+- existing tests should be modified to reflect requested modifications. building completely new tests to reflect changes on existing codebase as "test for change x" is suboptimal.
+- if hardware cannot handle the requested fps, it should be limited to the hardware's maximum. if fps is 0 (manually), fps should be limited to the hardware's maximum.
+- fps info should be displayed on screen (when --display, and always for logger)
