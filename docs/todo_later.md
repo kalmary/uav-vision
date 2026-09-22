@@ -61,3 +61,4 @@ processing/inference:
   --minimum-confidence MINIMUM_CONFIDENCE
   --top-k TOP_K
 ``` 
+- yolo models should be downloaded and used from models/ dir next to src.
