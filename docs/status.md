@@ -66,3 +66,10 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Complete the Step 6c review — verified exception preservation and traceback credential redaction, then completed the 6a–6c integration checks.
 - Refine the remaining workplan — specified grouped camera/device/model/display/FPS CLI contracts, model-specific inference sizing, and logically ordered Steps 6e–6i without changing code.
 - Correct startup-reporting requirements — required every entry point to resolve packaged defaults and the selected YOLO model before logging the complete effective configuration.
+- Investigate Git synchronization issues — began evidence gathering and requested the exact failing pull or push command and complete error output without running Git operations.
+- Diagnose Git synchronization failure — confirmed that `origin/main` exists and local `main` lacks only its upstream tracking configuration.
+- Identify divergent Git history — confirmed tracking is fixed while local and remote `main` require history comparison before choosing merge or rebase.
+- Compare divergent branches — found four similarly named commits on each side with different hashes and deferred reconciliation until their final tree contents are compared.
+- Locate the branch-content difference — confirmed remote `main` differs only by its tracked root-level `yolo26n.pt`, while local model files are untracked under `models/`.
+- Define model-weight cleanup — selected a repository-wide `*.pt` ignore rule and a protected update of the outdated remote history, pending design approval.
+- Ignore model weights — added a repository-wide `*.pt` rule and verified local YOLO weight files no longer appear as untracked content.
