@@ -73,9 +73,11 @@ class UltralyticsDetector:
         self,
         settings: InferenceSettings,
         model_identifier: str,
+        input_size: int,
         model_factory: Optional[Callable[..., Any]] = None,
     ) -> None:
         self._device = settings.device
+        self._input_size = input_size
         try:
             self._model = (
                 model_factory(model_identifier, task="detect")
@@ -88,7 +90,11 @@ class UltralyticsDetector:
             ) from error
 
     def detect(self, frame: Frame) -> Tuple[Detection, ...]:
-        arguments = {"source": frame.image, "verbose": False}
+        arguments = {
+            "source": frame.image,
+            "verbose": False,
+            "imgsz": self._input_size,
+        }
         arguments["device"] = self._device
         try:
             results = self._model.predict(**arguments)

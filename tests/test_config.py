@@ -1,3 +1,5 @@
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from uav_vision.config.models import ModelSize
@@ -8,6 +10,7 @@ from uav_vision.config.settings import (
     DetectionFilterSettings,
     DisplaySettings,
     InferenceSettings,
+    ModelSettings,
     ProcessingSettings,
 )
 
@@ -60,7 +63,11 @@ def test_inference_accepts_only_cpu_or_cuda(device):
         InferenceSettings(device=device)
 
 
-@pytest.mark.parametrize("fps", [0, -1, 1.5, True])
+def test_settings_accept_zero_fps_as_uncapped():
+    assert AppSettings(fps=0).fps == 0
+
+
+@pytest.mark.parametrize("fps", [-1, 1.5, True])
 def test_settings_reject_invalid_fps(fps):
     with pytest.raises(ValueError, match="fps"):
         AppSettings(fps=fps)
@@ -76,6 +83,26 @@ def test_settings_reject_invalid_fps(fps):
 )
 def test_settings_reject_non_enum_selections(settings):
     with pytest.raises(ValueError, match="selection"):
+        settings()
+
+
+def test_model_settings_are_frozen():
+    model = ModelSettings("models/yolo26n.pt", 640)
+
+    with pytest.raises(FrozenInstanceError):
+        model.input_size = 320
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        lambda: ModelSettings("", 640),
+        lambda: ModelSettings("models/yolo26n.pt", 0),
+        lambda: ModelSettings("models/yolo26n.pt", True),
+    ],
+)
+def test_model_settings_reject_invalid_fields(settings):
+    with pytest.raises(ValueError, match="model"):
         settings()
 
 

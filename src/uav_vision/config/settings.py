@@ -132,10 +132,26 @@ class LogSettings:
 
 
 @dataclass(frozen=True)
+class ModelSettings:
+    identifier: str
+    input_size: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.identifier, str) or not self.identifier.strip():
+            raise ValueError("model identifier must be a non-empty string")
+        if (
+            isinstance(self.input_size, bool)
+            or not isinstance(self.input_size, int)
+            or self.input_size <= 0
+        ):
+            raise ValueError("model input size must be a positive integer")
+
+
+@dataclass(frozen=True)
 class YoloSettings:
     path: Optional[Path]
     origin: str
-    models: Mapping[ProcessingType, Mapping[ModelSize, str]]
+    models: Mapping[ProcessingType, Mapping[ModelSize, ModelSettings]]
     detection_filters: DetectionFilterSettings = field(
         default_factory=DetectionFilterSettings
     )
@@ -149,26 +165,25 @@ class YoloSettings:
             raise ValueError("YOLO configuration origin must be a non-empty string")
         if not isinstance(self.detection_filters, DetectionFilterSettings):
             raise ValueError("YOLO detection filters are invalid")
-        for processing_type, model_identifiers in self.models.items():
+        if not isinstance(self.models, Mapping):
+            raise ValueError("YOLO model mappings must be objects")
+        for processing_type, model_settings in self.models.items():
             if not isinstance(processing_type, ProcessingType):
                 raise ValueError("YOLO processing type selection is invalid")
-            if not isinstance(model_identifiers, Mapping):
+            if not isinstance(model_settings, Mapping):
                 raise ValueError("YOLO model mappings must be objects")
-            for model_size, model_identifier in model_identifiers.items():
+            for model_size, model in model_settings.items():
                 if not isinstance(model_size, ModelSize):
                     raise ValueError("YOLO model size selection is invalid")
-                if (
-                    not isinstance(model_identifier, str)
-                    or not model_identifier.strip()
-                ):
-                    raise ValueError("YOLO model identifier must be a non-empty string")
+                if not isinstance(model, ModelSettings):
+                    raise ValueError("YOLO model selection must contain model settings")
         object.__setattr__(
             self,
             "models",
             MappingProxyType(
                 {
-                    processing_type: MappingProxyType(dict(model_identifiers))
-                    for processing_type, model_identifiers in self.models.items()
+                    processing_type: MappingProxyType(dict(model_settings))
+                    for processing_type, model_settings in self.models.items()
                 }
             ),
         )
@@ -197,11 +212,11 @@ class AppSettings:
             raise ValueError("log settings are invalid")
         if self.yolo is not None and not isinstance(self.yolo, YoloSettings):
             raise ValueError("YOLO settings are invalid")
-        if isinstance(self.fps, bool) or not isinstance(self.fps, int) or self.fps <= 0:
-            raise ValueError("fps must be a positive integer")
+        if isinstance(self.fps, bool) or not isinstance(self.fps, int) or self.fps < 0:
+            raise ValueError("fps must be a non-negative integer")
 
     @property
-    def model_identifier(self) -> str:
+    def model(self) -> ModelSettings:
         if self.yolo is None:
             raise ValueError("YOLO configuration is required to resolve a model")
         try:
@@ -213,6 +228,14 @@ class AppSettings:
                 "YOLO configuration does not support the selected processing type and "
                 "model size"
             ) from error
+
+    @property
+    def model_identifier(self) -> str:
+        return self.model.identifier
+
+    @property
+    def model_input_size(self) -> int:
+        return self.model.input_size
 
     @property
     def log_level(self) -> LogLevel:

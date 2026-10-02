@@ -21,7 +21,7 @@ def test_frame_accepts_a_contiguous_bgr_image():
     image = np.zeros((480, 640, 3), dtype=np.uint8)
     captured_at = datetime(2026, 9, 18, tzinfo=timezone.utc)
 
-    frame = Frame(image=image, sequence=3, captured_at=captured_at)
+    frame = Frame(image=image, captured_at=captured_at)
 
     assert frame.width == 640
     assert frame.height == 480
@@ -39,16 +39,7 @@ def test_frame_accepts_a_contiguous_bgr_image():
 )
 def test_frame_rejects_an_image_that_is_not_contiguous_bgr_uint8(image):
     with pytest.raises(ValueError, match="BGR"):
-        Frame(image=image, sequence=0, captured_at=datetime.now(timezone.utc))
-
-
-def test_frame_rejects_a_boolean_sequence_number():
-    with pytest.raises(ValueError, match="sequence"):
-        Frame(
-            image=np.zeros((8, 8, 3), dtype=np.uint8),
-            sequence=True,
-            captured_at=datetime.now(timezone.utc),
-        )
+        Frame(image=image, captured_at=datetime.now(timezone.utc))
 
 
 @pytest.mark.parametrize(
@@ -59,7 +50,6 @@ def test_frame_rejects_an_invalid_capture_timestamp(captured_at):
     with pytest.raises(ValueError, match="timestamp"):
         Frame(
             image=np.zeros((8, 8, 3), dtype=np.uint8),
-            sequence=0,
             captured_at=captured_at,
         )
 
@@ -120,7 +110,6 @@ def diagnostics():
 def test_processed_frame_keeps_the_detection_result_for_its_frame():
     frame = Frame(
         image=np.zeros((8, 8, 3), dtype=np.uint8),
-        sequence=0,
         captured_at=datetime.now(timezone.utc),
     )
     detection = Detection(
@@ -136,6 +125,56 @@ def test_processed_frame_keeps_the_detection_result_for_its_frame():
     assert processed.frame is frame
     assert processed.detections == (detection,)
     assert processed.result is result
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        (1.0, 1.0, 7.0, 7.0),
+        (0.0, 0.0, 8.0, 8.0),
+    ],
+)
+def test_processed_frame_accepts_detection_bounds_within_its_frame(bounds):
+    frame = Frame(
+        image=np.zeros((8, 8, 3), dtype=np.uint8),
+        captured_at=datetime.now(timezone.utc),
+    )
+    detection = Detection(
+        class_id=0,
+        class_name="person",
+        confidence=0.9,
+        bounding_box=BoundingBox(*bounds),
+    )
+    result = DetectionResult((detection,))
+
+    assert ProcessedFrame(frame, result, diagnostics()).result is result
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [
+        (1.0, 1.0, 8.1, 7.0),
+        (1.0, 1.0, 7.0, 8.1),
+    ],
+)
+def test_processed_frame_rejects_detection_bounds_outside_its_frame(bounds):
+    frame = Frame(
+        image=np.zeros((8, 8, 3), dtype=np.uint8),
+        captured_at=datetime.now(timezone.utc),
+    )
+    detection = Detection(
+        class_id=0,
+        class_name="person",
+        confidence=0.9,
+        bounding_box=BoundingBox(*bounds),
+    )
+
+    with pytest.raises(ValueError, match="within the frame"):
+        ProcessedFrame(
+            frame,
+            DetectionResult((detection,)),
+            diagnostics(),
+        )
 
 
 def test_detection_result_accepts_an_empty_tuple():
@@ -240,7 +279,6 @@ def test_processed_frame_rejects_result_dimensions_that_do_not_match_its_frame(
 ):
     frame = Frame(
         image=np.zeros((8, 8, 3), dtype=np.uint8),
-        sequence=0,
         captured_at=datetime.now(timezone.utc),
     )
 
@@ -251,7 +289,6 @@ def test_processed_frame_rejects_result_dimensions_that_do_not_match_its_frame(
 def test_processed_frame_accepts_each_result_variant_with_matching_dimensions():
     frame = Frame(
         image=np.zeros((8, 8, 3), dtype=np.uint8),
-        sequence=0,
         captured_at=datetime.now(timezone.utc),
     )
     segmentation = SegmentationResult(
@@ -300,7 +337,6 @@ def test_processed_frame_rejects_a_result_for_a_different_processing_type(
 ):
     frame = Frame(
         image=np.zeros((8, 8, 3), dtype=np.uint8),
-        sequence=0,
         captured_at=datetime.now(timezone.utc),
     )
 
@@ -327,7 +363,6 @@ def test_processed_frame_rejects_a_result_for_a_different_processing_type(
 def test_processed_frame_rejects_missing_or_mixed_results(value):
     frame = Frame(
         image=np.zeros((8, 8, 3), dtype=np.uint8),
-        sequence=0,
         captured_at=datetime.now(timezone.utc),
     )
 
@@ -342,6 +377,8 @@ def test_processed_frame_rejects_missing_or_mixed_results(value):
         ("inference_duration", -0.1),
         ("inference_duration", float("nan")),
         ("processing_duration", float("inf")),
+        ("frames_per_second", 0),
+        ("frames_per_second", float("inf")),
         ("raw_count", True),
         ("raw_count", -1),
         ("retained_count", 2),
@@ -354,6 +391,7 @@ def test_processing_diagnostics_reject_invalid_values(field, value):
         processing_duration=0.3,
         raw_count=1,
         retained_count=1,
+        frames_per_second=30.0,
     )
     values[field] = value
 

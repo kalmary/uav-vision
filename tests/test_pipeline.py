@@ -18,10 +18,9 @@ from uav_vision.domain import (
 from uav_vision.pipeline import run_pipeline
 
 
-def frame(sequence):
+def frame():
     return Frame(
         image=np.zeros((12, 16, 3), dtype=np.uint8),
-        sequence=sequence,
         captured_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
     )
 
@@ -84,7 +83,7 @@ class OutputDouble:
 
 
 def test_stops_before_reading_when_shutdown_callback_immediately_requests_stop():
-    source = SourceDouble((frame(1),))
+    source = SourceDouble((frame(),))
     processor = ProcessorDouble()
 
     run_pipeline(source, processor, (), should_stop=lambda: True)
@@ -104,8 +103,8 @@ def test_stops_when_source_reaches_end_of_stream():
 
 
 def test_processes_each_frame_once_before_end_of_stream():
-    first = frame(1)
-    second = frame(2)
+    first = frame()
+    second = frame()
     source = SourceDouble((first, second))
     processor = ProcessorDouble()
     output = OutputDouble()
@@ -118,7 +117,7 @@ def test_processes_each_frame_once_before_end_of_stream():
 
 
 def test_delivers_the_same_processed_frame_to_all_outputs_before_stopping():
-    input_frame = frame(1)
+    input_frame = frame()
     source = SourceDouble((input_frame,))
     processed = ProcessedFrame(
         input_frame,
@@ -139,8 +138,8 @@ def test_delivers_the_same_processed_frame_to_all_outputs_before_stopping():
 
 
 def test_does_not_read_another_frame_after_an_output_requests_stop():
-    first = frame(1)
-    source = SourceDouble((first, frame(2)))
+    first = frame()
+    source = SourceDouble((first, frame()))
     processor = ProcessorDouble()
     output = OutputDouble(True)
 
@@ -151,7 +150,7 @@ def test_does_not_read_another_frame_after_an_output_requests_stop():
 
 
 def test_checks_shutdown_callback_before_each_read_boundary():
-    source = SourceDouble((frame(1), frame(2)))
+    source = SourceDouble((frame(), frame()))
     processor = ProcessorDouble()
     read_counts = []
 
@@ -165,7 +164,7 @@ def test_checks_shutdown_callback_before_each_read_boundary():
 
 
 def test_processes_frames_without_outputs():
-    source = SourceDouble((frame(1),))
+    source = SourceDouble((frame(),))
     processor = ProcessorDouble()
 
     run_pipeline(source, processor, ())
@@ -200,7 +199,7 @@ def test_propagates_processor_errors_unchanged():
     error = RuntimeError("processing failed")
 
     with pytest.raises(RuntimeError) as raised:
-        run_pipeline(SourceDouble((frame(1),)), ProcessorDouble(error=error), ())
+        run_pipeline(SourceDouble((frame(),)), ProcessorDouble(error=error), ())
 
     assert raised.value is error
 
@@ -212,7 +211,7 @@ def test_propagates_output_errors_unchanged(index):
     outputs[index] = OutputDouble(error=error)
 
     with pytest.raises(RuntimeError) as raised:
-        run_pipeline(SourceDouble((frame(1),)), ProcessorDouble(), outputs)
+        run_pipeline(SourceDouble((frame(),)), ProcessorDouble(), outputs)
 
     assert raised.value is error
 
@@ -227,7 +226,7 @@ def test_propagates_keyboard_interrupt_unchanged():
 
 
 def test_leaves_source_and_outputs_open_for_the_application_to_close():
-    source = SourceDouble((frame(1),))
+    source = SourceDouble((frame(),))
     processor = ProcessorDouble()
     output = OutputDouble()
 
@@ -238,7 +237,7 @@ def test_leaves_source_and_outputs_open_for_the_application_to_close():
 
 
 def test_pipeline_attaches_its_capture_and_processing_measurements():
-    input_frame = frame(1)
+    input_frame = frame()
     processed = ProcessedFrame(
         input_frame,
         DetectionResult(()),
@@ -259,6 +258,114 @@ def test_pipeline_attaches_its_capture_and_processing_measurements():
     assert diagnostics.processing_duration == pytest.approx(0.3)
 
 
+def test_pipeline_limits_fast_iterations_without_accumulating_deadlines():
+    first = frame()
+    second = frame()
+    output = OutputDouble()
+    waits = []
+
+    run_pipeline(
+        SourceDouble((first, second)),
+        ProcessorDouble(),
+        (output,),
+        fps=10,
+        clock=iter(
+            (
+                0.0,
+                0.01,
+                0.02,
+                0.03,
+                0.04,
+                0.1,
+                0.11,
+                0.12,
+                0.13,
+                0.14,
+                0.2,
+            )
+        ).__next__,
+        wait=waits.append,
+    )
+
+    assert waits == pytest.approx([0.06, 0.06])
+    assert output.calls[0].diagnostics.frames_per_second is None
+    assert output.calls[1].diagnostics.frames_per_second == pytest.approx(10.0)
+
+
+def test_pipeline_does_not_wait_when_processing_exceeds_the_target_period():
+    waits = []
+
+    run_pipeline(
+        SourceDouble((frame(),)),
+        ProcessorDouble(),
+        (OutputDouble(),),
+        fps=10,
+        clock=iter((0.0, 0.1, 0.2, 0.3, 0.4, 0.5)).__next__,
+        wait=waits.append,
+    )
+
+    assert waits == []
+
+
+def test_pipeline_zero_fps_runs_without_waiting():
+    waits = []
+
+    run_pipeline(
+        SourceDouble((frame(),)),
+        ProcessorDouble(),
+        (OutputDouble(),),
+        fps=0,
+        clock=iter((0.0, 0.01, 0.02, 0.03, 0.04, 0.05)).__next__,
+        wait=waits.append,
+    )
+
+    assert waits == []
+
+
+def test_pipeline_does_not_wait_after_an_output_requests_stop():
+    waits = []
+
+    run_pipeline(
+        SourceDouble((frame(),)),
+        ProcessorDouble(),
+        (OutputDouble(should_stop=True),),
+        fps=10,
+        clock=iter((0.0, 0.01, 0.02, 0.03)).__next__,
+        wait=waits.append,
+    )
+
+    assert waits == []
+
+
+def test_pipeline_interrupts_fps_wait_when_shutdown_is_requested():
+    current_time = [0.0]
+    shutdown_requested = [False]
+    waits = []
+    source = SourceDouble((frame(), frame()))
+
+    def clock():
+        return current_time[0]
+
+    def wait(duration):
+        waits.append(duration)
+        current_time[0] += duration
+        shutdown_requested[0] = True
+
+    run_pipeline(
+        source,
+        ProcessorDouble(),
+        (OutputDouble(),),
+        should_stop=lambda: shutdown_requested[0],
+        fps=10,
+        clock=clock,
+        wait=wait,
+    )
+
+    assert waits == pytest.approx([0.05])
+    assert sum(waits) < 0.1
+    assert source.read_calls == 1
+
+
 @pytest.mark.parametrize(
     "processing_type,result",
     [
@@ -276,7 +383,7 @@ def test_pipeline_attaches_its_capture_and_processing_measurements():
     ],
 )
 def test_pipeline_delivers_each_non_detection_result_variant(processing_type, result):
-    input_frame = frame(1)
+    input_frame = frame()
     processed = ProcessedFrame(
         input_frame,
         result,

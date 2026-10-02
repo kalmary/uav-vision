@@ -16,7 +16,6 @@ from .segmentation import SegmentationResult
 @dataclass(frozen=True)
 class Frame:
     image: np.ndarray
-    sequence: int
     captured_at: datetime
 
     def __post_init__(self) -> None:
@@ -31,12 +30,6 @@ class Frame:
             raise ValueError(
                 "Frame image must be a non-empty contiguous BGR uint8 array"
             )
-        if (
-            isinstance(self.sequence, bool)
-            or not isinstance(self.sequence, int)
-            or self.sequence < 0
-        ):
-            raise ValueError("Frame sequence must be non-negative")
         if (
             not isinstance(self.captured_at, datetime)
             or self.captured_at.tzinfo is None
@@ -60,6 +53,7 @@ class ProcessingDiagnostics:
     processing_duration: Optional[float]
     raw_count: int
     retained_count: int
+    frames_per_second: Optional[float] = None
 
     def __post_init__(self) -> None:
         for name, value, optional in (
@@ -84,6 +78,13 @@ class ProcessingDiagnostics:
                 raise ValueError(name + " must be a non-negative integer")
         if self.retained_count > self.raw_count:
             raise ValueError("Retained result count must not exceed raw result count")
+        if self.frames_per_second is not None and (
+            isinstance(self.frames_per_second, bool)
+            or not isinstance(self.frames_per_second, Real)
+            or not isfinite(self.frames_per_second)
+            or self.frames_per_second <= 0
+        ):
+            raise ValueError("Frames per second must be a positive finite number")
 
 
 Result = Union[DetectionResult, SegmentationResult, DepthResult]
@@ -119,6 +120,13 @@ class ProcessedFrame:
         elif isinstance(self.result, DepthResult):
             result_height, result_width = self.result.depth_map.shape
         else:
+            for detection in self.result.detections:
+                bounding_box = detection.bounding_box
+                if (
+                    bounding_box.right > self.frame.width
+                    or bounding_box.bottom > self.frame.height
+                ):
+                    raise ValueError("Detection bounding box must be within the frame")
             return
         if result_width != self.frame.width or result_height != self.frame.height:
             raise ValueError("Processed result dimensions must match the frame")

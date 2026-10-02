@@ -68,7 +68,7 @@ print("CUDA available:", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("CUDA device:", torch.cuda.get_device_name(0))
 print("TensorRT:", trt.__version__)
-print("Ultralytics model load:", type(YOLO("yolo26n.pt", task="detect")).__name__)
+print("Ultralytics model load:", type(YOLO("models/yolo26n.pt", task="detect")).__name__)
 PY
 ```
 
@@ -85,16 +85,23 @@ version. Build the nano model on the Jetson that will execute it, rather than
 copying an engine made on a laptop or another Jetson:
 
 ```sh
-yolo export model=yolo26n.pt format=engine device=0
+yolo export model=models/yolo26n.pt format=engine device=0
 ```
 
-Keep the resulting `yolo26n.engine` beside a user configuration file. The
+Keep the resulting `models/yolo26n.engine` in the project model directory. The
 application resolves model identifiers from the YOLO configuration rather than
 accepting a model path on the command line. For example, create
 `jetson-yolo.json`:
 
 ```json
-{"detection": {"nano": "yolo26n.engine"}}
+{
+  "detection": {
+    "nano": {
+      "identifier": "models/yolo26n.engine",
+      "input_size": 640
+    }
+  }
+}
 ```
 
 Then reference it from `jetson-app.json` and select CUDA explicitly:

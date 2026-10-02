@@ -87,13 +87,13 @@ A user configuration may be partial. Unknown keys, invalid types, invalid enum v
 
 ## Data model
 
-- `Frame` owns a NumPy image array, sequence number, and capture timestamp.
+- `Frame` owns a NumPy image array and capture timestamp.
 - `BoundingBox` stores ordered image-space corner coordinates.
 - `Detection` stores a class identifier, class name, confidence, and bounding box.
 - `DetectionResult` contains the filtered detections for one frame.
 - `SegmentationResult` contains validated semantic class masks and class metadata.
 - `DepthResult` contains a validated, finite depth map and its summary statistics.
-- `ProcessingDiagnostics` contains immutable capture, provider-inference, and processing durations plus mode-specific raw and retained result counts.
+- `ProcessingDiagnostics` contains immutable capture, provider-inference, and processing durations, measured FPS, and mode-specific raw and retained result counts.
 - `ProcessedFrame` joins one frame with exactly one result variant matching the selected processing mode.
 
 Using one explicit result variant avoids invalid states such as a frame containing detection, segmentation, and depth results simultaneously. Provider objects are converted to application-owned types before reaching processing outputs.
@@ -112,7 +112,7 @@ Normal CLI use does not require a camera type or source. Platform-aware selectio
 
 Separate `Detector`, `Segmenter`, and `DepthEstimator` protocols accept an application `Frame` and return provider-independent values for their mode. Ultralytics adapters own model loading, device selection, inference, and result conversion.
 
-Model-size aliases and mode-specific model mappings come from the YOLO configuration. The public CLI selects a supported size rather than an arbitrary model path. A target-specific TensorRT engine can be configured for Jetson without exposing provider details elsewhere. A local `models/` directory is added only if the project starts owning model files; downloaded Ultralytics models do not justify it by themselves.
+Model-size aliases and mode-specific model mappings come from the YOLO configuration; each size mapping atomically owns its model identifier and input size. The public CLI selects a supported size rather than an arbitrary model path. Packaged identifiers resolve under the project `models/` directory so Ultralytics loads existing weights there and downloads missing weights there. A target-specific TensorRT engine can be configured for Jetson without exposing provider details elsewhere.
 
 ### Processing mode
 
@@ -122,13 +122,17 @@ Detection filtering is applied before outputs in a fixed order: selected classes
 
 ### Output and logging
 
-`FrameOutput` consumes a `ProcessedFrame` and may request shutdown. `LogOutput` is always present in headless and display runs. `DisplayOutput` is an optional second output and owns all windowing behavior.
+`FrameOutput` consumes a `ProcessedFrame` and may request shutdown. `LogOutput` is always present in headless and display runs. `DisplayOutput` is an optional second output and owns all windowing behavior. It scales annotated frames uniformly into the configured dimensions and centers them on a black canvas, preserving their aspect ratio without changing frames used by headless processing.
 
 At `basic`, the logger writes the effective launch configuration once and one filtered summary per processed frame:
 
 - detection: class name, confidence, and bounding box for every retained detection, including an explicit empty result;
 - semantic segmentation: the number of unique classes present in the frame;
 - depth: minimum, maximum, mean, and standard deviation.
+
+Every per-frame record includes measured FPS. The first processed frame reports
+an explicit unavailable state because no preceding frame period exists. Display
+output overlays the same measured value when enabled.
 
 At `debug`, the logger includes everything from `basic` plus frame identity and dimensions, camera/provider/model/device selection, raw and retained result counts, component initialization details, capture/provider-inference/processing timings, and tracebacks for failures. The pipeline owns capture and total processing measurements; the selected processor owns provider-inference measurement. The logger consumes these diagnostics and does not attempt to infer timings from output order.
 

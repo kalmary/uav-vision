@@ -62,7 +62,6 @@ class Model:
 def frame():
     return Frame(
         image=np.zeros((12, 16, 3), dtype=np.uint8),
-        sequence=4,
         captured_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
     )
 
@@ -86,10 +85,11 @@ def test_segmentation_and_depth_protocols_are_structurally_implemented():
     assert isinstance(DepthEstimatorDouble(), DepthEstimator)
 
 
-def make_detector(model, detector_settings=None):
+def make_detector(model, detector_settings=None, input_size=640):
     return UltralyticsDetector(
         detector_settings or settings(),
-        "yolo26n.pt",
+        "models/yolo26n.pt",
+        input_size,
         model_factory=lambda path, task: model,
     )
 
@@ -105,11 +105,21 @@ def test_detector_loads_the_resolved_model_identifier():
 
     UltralyticsDetector(
         InferenceSettings(),
-        "cached-detector.engine",
+        "models/cached-detector.engine",
+        640,
         model_factory=lambda path, task: calls.append((path, task)) or Model(),
     )
 
-    assert calls == [("cached-detector.engine", "detect")]
+    assert calls == [("models/cached-detector.engine", "detect")]
+
+
+def test_detector_requires_an_explicit_input_size():
+    with pytest.raises(TypeError):
+        UltralyticsDetector(
+            InferenceSettings(),
+            "models/yolo26n.pt",
+            model_factory=lambda path, task: Model(),
+        )
 
 
 def test_model_is_loaded_once_during_initialization():
@@ -117,24 +127,41 @@ def test_model_is_loaded_once_during_initialization():
     model = Model([Result(Boxes([], [], []), {})])
     detector = UltralyticsDetector(
         settings(),
-        "yolo26n.pt",
+        "models/yolo26n.pt",
+        640,
         model_factory=lambda path, task: calls.append((path, task)) or model,
     )
 
     detector.detect(frame())
     detector.detect(frame())
 
-    assert calls == [("yolo26n.pt", "detect")]
+    assert calls == [("models/yolo26n.pt", "detect")]
+
+
+def test_detect_uses_the_constructed_input_size_for_consecutive_frames():
+    model = Model([Result(Boxes([], [], []), {})])
+    detector = make_detector(model, input_size=512)
+    input_frame = frame()
+
+    detector.detect(input_frame)
+    detector.detect(input_frame)
+
+    assert [call["imgsz"] for call in model.calls] == [512, 512]
 
 
 def test_detect_passes_the_frame_bgr_image_and_explicit_device():
     model = Model([Result(Boxes([], [], []), {})])
-    detector = make_detector(model, settings(device="cuda"))
+    detector = make_detector(model, settings(device="cuda"), input_size=512)
     input_frame = frame()
 
     assert detector.detect(input_frame) == ()
     assert model.calls == [
-        {"source": input_frame.image, "verbose": False, "device": "cuda"}
+        {
+            "source": input_frame.image,
+            "verbose": False,
+            "device": "cuda",
+            "imgsz": 512,
+        }
     ]
 
 
@@ -146,7 +173,12 @@ def test_detect_passes_the_cpu_device():
     detector.detect(input_frame)
 
     assert model.calls == [
-        {"source": input_frame.image, "verbose": False, "device": "cpu"}
+        {
+            "source": input_frame.image,
+            "verbose": False,
+            "device": "cpu",
+            "imgsz": 640,
+        }
     ]
 
 
@@ -337,7 +369,8 @@ def test_initialization_wraps_model_factory_errors_with_their_cause():
     with pytest.raises(InferenceInitializationError) as raised:
         UltralyticsDetector(
             settings(),
-            "yolo26n.pt",
+            "models/yolo26n.pt",
+            640,
             model_factory=lambda path, task: (_ for _ in ()).throw(error),
         )
 
@@ -348,7 +381,7 @@ def test_initialization_wraps_missing_ultralytics_import(monkeypatch):
     monkeypatch.setitem(sys.modules, "ultralytics", None)
 
     with pytest.raises(InferenceInitializationError) as raised:
-        UltralyticsDetector(settings(), "yolo26n.pt")
+        UltralyticsDetector(settings(), "models/yolo26n.pt", 640)
 
     assert isinstance(raised.value.__cause__, ImportError)
 

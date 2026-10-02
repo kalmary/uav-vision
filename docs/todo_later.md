@@ -1,5 +1,4 @@
 - cli should have arguments: config-path with default value - under it default config is stored and if any argument is not provided, the default is used. if another config path is given, it is used instead as fallback values.
-- where are models stored? it would be best to have a separate directory for models, so they are not mixed with other files. (dont code if not necessary)
 - in cli: model-path unnecessary - we use only models from ultralytics for now. it is possible that in the future we'll support other model sources. program structure should make the switch easy (ensure it is done now/ do it), but no other models are required.
 - in cli: extra yolo arguments are necessary:
   - work mode: classification with bboxes? depthmap? semantic segmentation?
@@ -42,7 +41,6 @@ required working arguments for camera:
 - add to cli fps (int) value with default 30. speed of inference + display + logging is limited to this value. if no --display is set, just inference+ logging is limited. if hardware cannot handle the requested fps, it should be limited to the hardware's maximum. if fps is 0 (manually), fps should be limited to the hardware's maximum.
 
 
-- frame sequence isnt necessary info and it can be cause of int overflow.
 - existing tests should be modified to reflect requested modifications. building completely new tests to reflect changes on existing codebase as "test for change x" is suboptimal.
 - if hardware cannot handle the requested fps, it should be limited to the hardware's maximum. if fps is 0 (manually), fps should be limited to the hardware's maximum.
 - fps info should be displayed on screen (when --display, and always for logger)

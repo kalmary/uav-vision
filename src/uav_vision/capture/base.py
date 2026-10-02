@@ -31,11 +31,10 @@ class FrameSource(Protocol):
     def close(self) -> None: ...
 
 
-def frame_from_image(image: np.ndarray, sequence: int) -> Frame:
+def frame_from_image(image: np.ndarray) -> Frame:
     try:
         return Frame(
             image=image,
-            sequence=sequence,
             captured_at=datetime.now(timezone.utc),
         )
     except ValueError as error:

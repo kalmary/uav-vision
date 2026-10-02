@@ -24,7 +24,9 @@ def _is_uri_userinfo(value: str) -> bool:
     digits = 0
     while digits < len(suffix) and suffix[digits].isdigit():
         digits += 1
-    return not (digits > 0 and digits < len(suffix) and suffix[digits] in "/?# \t\r\n")
+    if digits > 0 and digits < len(suffix) and suffix[digits] in "/?#":
+        return not any(character in " \t\r\n" for character in suffix[digits + 1 :])
+    return not (digits > 0 and digits < len(suffix) and suffix[digits] in " \t\r\n")
 
 
 def _uri_userinfo_end(value: str, authority_start: int, segment_end: int) -> int:
@@ -39,8 +41,6 @@ def _uri_userinfo_end(value: str, authority_start: int, segment_end: int) -> int
         if next_end < 0:
             return credential_end
         between = value[credential_end + 1 : next_end]
-        if "\n" not in between and "\r" not in between:
-            return credential_end
         if any(character in "/?#" for character in between):
             return credential_end
         credential_end = next_end
@@ -105,10 +105,17 @@ class LogOutput:
             raise RuntimeError("Log output is closed")
         if self._started:
             raise RuntimeError("Startup configuration was already written")
-        model_identifier = settings.model_identifier
+        model = settings.model
         if settings.yolo is None:
             raise ValueError("YOLO configuration is required for startup logging")
         self._started = True
+        filters = settings.yolo.detection_filters
+        selected_classes = (
+            "all"
+            if not filters.selected_classes
+            else ",".join(str(class_id) for class_id in filters.selected_classes)
+        )
+        top_k = "unlimited" if filters.top_k is None else str(filters.top_k)
         source_name = "index" if isinstance(settings.capture.source, int) else "source"
         destination = (
             "console" if self._settings.path is None else str(self._settings.path)
@@ -117,18 +124,24 @@ class LogOutput:
             (
                 "startup camera.type={0} camera.{1}={2} processing.type={3} "
                 "inference.model_size={4} inference.model={5} "
-                "inference.device={6} runtime.fps={7} display.enabled={8} "
-                "display.width={9} display.height={10} logging.level={11} "
-                "logging.destination={12} yolo.origin={13}"
+                "inference.input_size={6} inference.device={7} runtime.fps={8} "
+                "detection.selected_classes={9} "
+                "detection.minimum_confidence={10} detection.top_k={11} "
+                "display.enabled={12} display.width={13} display.height={14} "
+                "logging.level={15} logging.destination={16} yolo.origin={17}"
             ).format(
                 settings.capture.camera_type.value,
                 source_name,
                 settings.capture.source,
                 settings.processing.processing_type.value,
                 settings.inference.model_size.value,
-                model_identifier,
+                model.identifier,
+                model.input_size,
                 settings.inference.device,
                 settings.fps,
+                selected_classes,
+                filters.minimum_confidence,
+                top_k,
                 str(settings.display.enabled).lower(),
                 settings.display.width,
                 settings.display.height,
@@ -165,6 +178,12 @@ class LogOutput:
         if self._closed:
             raise RuntimeError("Log output is closed")
         if isinstance(processed.result, DetectionResult):
+            frames_per_second = processed.diagnostics.frames_per_second
+            fps = (
+                "unavailable"
+                if frames_per_second is None
+                else "{0:.2f}".format(frames_per_second)
+            )
             detections = ", ".join(
                 "class={0} confidence={1:.6f} bbox=({2},{3},{4},{5})".format(
                     detection.class_name,
@@ -177,18 +196,17 @@ class LogOutput:
                 for detection in processed.result.detections
             )
             self._write(
-                "frame sequence={0} detections=[{1}]".format(
-                    processed.frame.sequence,
+                "frame fps={0} detections=[{1}]".format(
+                    fps,
                     detections,
                 )
             )
         if self._settings.level is LogLevel.DEBUG:
             diagnostics = processed.diagnostics
             self._write(
-                "frame sequence={0} captured_at={1} dimensions={2}x{3} "
-                "raw_count={4} retained_count={5} capture_duration={6:.6f} "
-                "inference_duration={7:.6f} processing_duration={8:.6f}".format(
-                    processed.frame.sequence,
+                "frame captured_at={0} dimensions={1}x{2} "
+                "raw_count={3} retained_count={4} capture_duration={5:.6f} "
+                "inference_duration={6:.6f} processing_duration={7:.6f}".format(
                     processed.frame.captured_at.isoformat(),
                     processed.frame.width,
                     processed.frame.height,

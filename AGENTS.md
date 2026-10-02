@@ -139,12 +139,13 @@ When instructions conflict, follow this order:
 
 - When task is complex and requires multiple steps, use an agent-based workflow.
 - You can use Superpowers skills then.
-- Uses Sol with high reasoning for architecture, planning, ambiguous problems, security analysis, and difficult reviews.
-- Uses Terra with medium or high reasoning by default for implementation, repository exploration, testing, and documentation.
+- Selects each agent's tier, model, and reasoning effort according to its assigned task.
+- Never uses Sol 6 or Sol 6.1 for delegated work.
+- Uses Sol 5.6 with high reasoning for work orchestration, architecture, solution planning, ambiguous decisions, security analysis, difficult reviews, and designing test cases.
+- Uses Terra 6 by default for well-specified coding tasks, implementation, repository exploration, routine testing, and documentation.
 - Reserves Luna for mechanical, repetitive, low-risk, fully specified work—not substantive implementation.
-- Uses Astra only as an exception when explicitly requested or when Sol is demonstrably insufficient.
 - Requires explicitly selecting both the model and reasoning effort.
 - Allows parallel agents only for independent tasks without overlapping file ownership.
-- Requires every delegation to define scope, constraints, expected output, and verification.
+- Requires every delegation to provide detailed context, exact scope, constraints, owned files, expected output, test cases, verification commands, and completion criteria.
 - Keeps integration decisions and final verification with the primary agent.
 - Requires reviewing and testing agent output rather than accepting it automatically.

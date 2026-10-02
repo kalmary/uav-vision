@@ -25,7 +25,7 @@ def run(
     settings: AppSettings,
     should_stop: Optional[Callable[[], bool]] = None,
 ) -> None:
-    settings.model_identifier
+    model = settings.model
     with ExitStack() as resources:
         log_output = LogOutput(settings.logging)
         resources.enter_context(log_output)
@@ -56,7 +56,9 @@ def run(
 
         try:
             detector = UltralyticsDetector(
-                settings.inference, settings.model_identifier
+                settings.inference,
+                model.identifier,
+                model.input_size,
             )
         except BaseException as error:
             _diagnose_failure(log_output, "inference", error)
@@ -64,7 +66,7 @@ def run(
         log_output.diagnostic(
             "inference",
             "initialized provider=ultralytics model={0} device={1}".format(
-                settings.model_identifier,
+                model.identifier,
                 settings.inference.device,
             ),
         )
@@ -103,7 +105,7 @@ def run(
             )
 
         try:
-            run_pipeline(source, processor, outputs, should_stop)
+            run_pipeline(source, processor, outputs, should_stop, settings.fps)
         except BaseException as error:
             try:
                 log_output.diagnostic("pipeline", "failed", error)

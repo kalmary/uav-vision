@@ -47,7 +47,7 @@ def test_partial_user_configuration_preserves_display_defaults(tmp_path):
 def test_complete_user_configuration_replaces_packaged_defaults(tmp_path):
     yolo_path = tmp_path / "models.json"
     yolo_path.write_text(
-        json.dumps({"detection": {"small": "models/detector.engine"}}),
+        json.dumps({"detection": {"small": {"identifier": "models/detector.engine"}}}),
         encoding="utf-8",
     )
     config_path = tmp_path / "app.json"
@@ -154,7 +154,7 @@ def test_user_object_replaced_by_a_scalar_is_not_masked_by_an_explicit_override(
 def test_yolo_path_is_resolved_relative_to_the_selected_application_file(tmp_path):
     yolo_path = tmp_path / "models.json"
     yolo_path.write_text(
-        json.dumps({"detection": {"nano": "models/detector.engine"}}),
+        json.dumps({"detection": {"nano": {"identifier": "models/detector.engine"}}}),
         encoding="utf-8",
     )
     config_path = tmp_path / "app.json"
@@ -167,9 +167,10 @@ def test_yolo_path_is_resolved_relative_to_the_selected_application_file(tmp_pat
     assert settings.yolo is not None
     assert settings.yolo.path == yolo_path
     assert (
-        settings.yolo.models[ProcessingType.DETECTION][ModelSize.NANO]
+        settings.yolo.models[ProcessingType.DETECTION][ModelSize.NANO].identifier
         == "models/detector.engine"
     )
+    assert settings.model.input_size == 640
 
 
 def test_loaded_yolo_model_mappings_are_immutable():
@@ -178,6 +179,62 @@ def test_loaded_yolo_model_mappings_are_immutable():
     assert settings.yolo is not None
     with pytest.raises(TypeError):
         settings.yolo.models[ProcessingType.DETECTION][ModelSize.NANO] = "other.pt"
+
+
+def test_yolo_input_size_is_resolved_with_the_selected_model(tmp_path):
+    yolo_path = tmp_path / "models.json"
+    yolo_path.write_text(
+        json.dumps({"detection": {"small": {"input_size": 512}}}),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "app.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "inference": {"model_size": "small"},
+                "yolo_config_path": "models.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.model.identifier == "models/yolo26s.pt"
+    assert settings.model.input_size == 512
+
+
+def test_different_configured_model_sizes_resolve_as_atomic_selections(tmp_path):
+    yolo_path = tmp_path / "models.json"
+    yolo_path.write_text(
+        json.dumps(
+            {
+                "detection": {
+                    "small": {"input_size": 512},
+                    "medium": {"input_size": 768},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "app.json"
+    config_path.write_text(
+        json.dumps({"yolo_config_path": "models.json"}), encoding="utf-8"
+    )
+
+    small = load_settings(config_path, overrides={"inference": {"model_size": "small"}})
+    medium = load_settings(
+        config_path, overrides={"inference": {"model_size": "medium"}}
+    )
+
+    assert (small.model.identifier, small.model.input_size) == (
+        "models/yolo26s.pt",
+        512,
+    )
+    assert (medium.model.identifier, medium.model.input_size) == (
+        "models/yolo26m.pt",
+        768,
+    )
 
 
 def test_yolo_detection_filters_are_loaded_as_immutable_settings(tmp_path):
@@ -230,7 +287,13 @@ def test_packaged_app_yolo_path_selects_the_named_packaged_configuration(
             values["yolo_config_path"] = "alternate-yolo.json"
             return json.dumps(values)
         if name == "alternate-yolo.json":
-            return json.dumps({"detection": {"nano": "alternate.pt"}})
+            return json.dumps(
+                {
+                    "detection": {
+                        "nano": {"identifier": "alternate.pt", "input_size": 320}
+                    }
+                }
+            )
         return read_text(package, name)
 
     monkeypatch.setattr(loader.resources, "read_text", packaged_text)
@@ -243,8 +306,57 @@ def test_packaged_app_yolo_path_selects_the_named_packaged_configuration(
         settings.yolo.origin == "package:uav_vision.config.defaults/alternate-yolo.json"
     )
     assert (
-        settings.yolo.models[ProcessingType.DETECTION][ModelSize.NANO] == "alternate.pt"
+        settings.yolo.models[ProcessingType.DETECTION][ModelSize.NANO].identifier
+        == "alternate.pt"
     )
+
+
+def test_packaged_yolo_model_without_input_size_is_rejected(monkeypatch):
+    read_text = loader.resources.read_text
+
+    def packaged_text(package, name):
+        if name == "app.json":
+            values = json.loads(read_text(package, name))
+            values["yolo_config_path"] = "alternate-yolo.json"
+            return json.dumps(values)
+        if name == "alternate-yolo.json":
+            return json.dumps({"detection": {"nano": {"identifier": "alternate.pt"}}})
+        return read_text(package, name)
+
+    monkeypatch.setattr(loader.resources, "read_text", packaged_text)
+
+    with pytest.raises(ValueError, match="input_size"):
+        load_settings()
+
+
+def test_yolo_configuration_rejects_unknown_model_setting(tmp_path):
+    yolo_path = tmp_path / "models.json"
+    yolo_path.write_text(
+        json.dumps({"detection": {"nano": {"unsupported": True}}}),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "app.json"
+    config_path.write_text(
+        json.dumps({"yolo_config_path": "models.json"}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="Unknown configuration key"):
+        load_settings(config_path)
+
+
+def test_yolo_configuration_rejects_invalid_model_identifier(tmp_path):
+    yolo_path = tmp_path / "models.json"
+    yolo_path.write_text(
+        json.dumps({"detection": {"nano": {"identifier": ""}}}),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "app.json"
+    config_path.write_text(
+        json.dumps({"yolo_config_path": "models.json"}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="model identifier"):
+        load_settings(config_path)
 
 
 def test_explicit_yolo_path_is_resolved_relative_to_the_current_directory(
@@ -253,7 +365,7 @@ def test_explicit_yolo_path_is_resolved_relative_to_the_current_directory(
 ):
     yolo_path = tmp_path / "models.json"
     yolo_path.write_text(
-        json.dumps({"detection": {"nano": "models/detector.engine"}}),
+        json.dumps({"detection": {"nano": {"identifier": "models/detector.engine"}}}),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -327,7 +439,8 @@ def test_missing_yolo_configuration_fails_descriptively(tmp_path):
 def test_yolo_configuration_rejects_unknown_model_size(tmp_path):
     yolo_path = tmp_path / "models.json"
     yolo_path.write_text(
-        json.dumps({"detection": {"tiny": "detector.pt"}}), encoding="utf-8"
+        json.dumps({"detection": {"tiny": {"identifier": "detector.pt"}}}),
+        encoding="utf-8",
     )
     config_path = tmp_path / "app.json"
     config_path.write_text(
@@ -335,6 +448,22 @@ def test_yolo_configuration_rejects_unknown_model_size(tmp_path):
     )
 
     with pytest.raises(ValueError, match="Unknown configuration key"):
+        load_settings(config_path)
+
+
+@pytest.mark.parametrize("input_size", [0, -1, 1.5, True, "640"])
+def test_yolo_configuration_rejects_invalid_input_size(tmp_path, input_size):
+    yolo_path = tmp_path / "models.json"
+    yolo_path.write_text(
+        json.dumps({"detection": {"nano": {"input_size": input_size}}}),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "app.json"
+    config_path.write_text(
+        json.dumps({"yolo_config_path": "models.json"}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="input size"):
         load_settings(config_path)
 
 

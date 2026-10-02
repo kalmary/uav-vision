@@ -24,7 +24,6 @@ class DetectorDouble:
 def frame():
     return Frame(
         image=np.zeros((12, 16, 3), dtype=np.uint8),
-        sequence=4,
         captured_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
     )
 

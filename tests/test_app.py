@@ -15,6 +15,7 @@ from uav_vision.config.settings import (
     DetectionFilterSettings,
     DisplaySettings,
     LogSettings,
+    ModelSettings,
     ProcessingType,
     YoloSettings,
 )
@@ -138,8 +139,8 @@ def test_run_processes_headless_camera_with_logger_as_its_first_output(
     monkeypatch.setattr(
         app,
         "run_pipeline",
-        lambda source_value, processor_value, outputs, should_stop: events.append(
-            ("pipeline", source_value, processor_value, outputs, should_stop)
+        lambda source_value, processor_value, outputs, should_stop, fps: events.append(
+            ("pipeline", source_value, processor_value, outputs, should_stop, fps)
         ),
     )
 
@@ -158,16 +159,16 @@ def test_run_processes_headless_camera_with_logger_as_its_first_output(
             ),
             None,
         ),
-        ("detector", (settings(camera_type).inference, "yolo26n.pt")),
+        ("detector", (settings(camera_type).inference, "models/yolo26n.pt", 640)),
         (
             "diagnostic",
             "inference",
-            "initialized provider=ultralytics model=yolo26n.pt device=cpu",
+            "initialized provider=ultralytics model=models/yolo26n.pt device=cpu",
             None,
         ),
         ("processor", detector),
         ("diagnostic", "processing", "initialized type=detection", None),
-        ("pipeline", source, processor, [log_output], stop),
+        ("pipeline", source, processor, [log_output], stop, 30),
     ]
     assert events[-2:] == ["close " + camera_name, "close logger"]
 
@@ -192,7 +193,7 @@ def test_run_uses_logger_first_and_display_as_second_output(monkeypatch):
     monkeypatch.setattr(
         app,
         "run_pipeline",
-        lambda source_value, processor, outputs, should_stop: events.append(
+        lambda source_value, processor, outputs, should_stop, fps: events.append(
             ("pipeline", outputs)
         ),
     )
@@ -204,7 +205,7 @@ def test_run_uses_logger_first_and_display_as_second_output(monkeypatch):
         (
             "diagnostic",
             "inference",
-            "initialized provider=ultralytics model=yolo26n.pt device=cpu",
+            "initialized provider=ultralytics model=models/yolo26n.pt device=cpu",
             None,
         ),
         ("diagnostic", "processing", "initialized type=detection", None),
@@ -227,7 +228,11 @@ def test_run_passes_yolo_detection_filters_to_the_processor(monkeypatch):
         yolo=YoloSettings(
             path=None,
             origin="test",
-            models={ProcessingType.DETECTION: {ModelSize.NANO: "model.pt"}},
+            models={
+                ProcessingType.DETECTION: {
+                    ModelSize.NANO: ModelSettings("model.pt", 640)
+                }
+            },
             detection_filters=filters,
         ),
     )

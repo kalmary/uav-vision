@@ -123,7 +123,7 @@ def _parser(*, prog: str, processing_type: ProcessingType) -> argparse.ArgumentP
     logging.add_argument("--log-path", type=Path, default=argparse.SUPPRESS)
 
     runtime = parser.add_argument_group("runtime")
-    runtime.add_argument("--fps", type=_positive_int, default=argparse.SUPPRESS)
+    runtime.add_argument("--fps", type=_non_negative_int, default=argparse.SUPPRESS)
     return parser
 
 

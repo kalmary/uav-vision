@@ -9,7 +9,7 @@ The Rust implementation was removed. The project is planned as a modular Python 
 | 3. Replaceable YOLO Inference and Processing Mode | Complete |
 | 4. Headless Pipeline, Outputs, and Entry Points | Implemented; live camera/display smoke tests pending |
 | 5. Jetson Nano Deployment and Validation | Prepared locally; Jetson hardware validation pending |
-| 6. Configuration, Processing Modes, and Mandatory Logging | 6a–6c complete; 6d–6i pending |
+| 6. Configuration, Processing Modes, and Mandatory Logging | 6a–6f complete; 6g–6i pending |
 
 ## Current decisions
 
@@ -23,21 +23,6 @@ The Rust implementation was removed. The project is planned as a modular Python 
 
 ## Work Log
 
-- Build the planned scaffold — added the requested folders and initial Rust files.
-- Keep the solution Rust-only — selected a Rust-native capture and inference direction in the workplan.
-- Divide implementation into steps — structured the project into five independently testable stages.
-- Save the implementation plan — added `docs/workplan.md`.
-- Implement Step 1 — added domain types, CLI configuration, validation, and unit tests.
-- Investigate incomplete compilation — identified scaffold placeholders that had not yet been implemented.
-- Implement Step 2 — added camera capture, frame conversion, capture errors, Linux V4L2 configuration, and unit tests.
-- Track implementation status — added this status document with the state of every workplan step.
-- Add per-prompt change tracking — added this rolling work log and its 50-entry maintenance rule to `AGENTS.md`.
-- Add JSON-backed defaults — designed configuration fallback for omitted command-line arguments.
-- Consider runtime-loaded defaults — evaluated disk loading, then superseded it before implementation.
-- Select compile-time embedding — placed the editable defaults in `src/config/config.json` and embedded them in the binary.
-- Approve the configuration design — implemented JSON fallback, CLI precedence, validation, executable parsing, and focused tests.
-- Review repository documentation — read all four Markdown files and recorded the current requirements, architecture, status, and work plan.
-- Evaluate Rust GPU inference — confirmed Jetson Nano CUDA is viable through its JetPack TensorRT stack, while the current Ultralytics Rust crate cannot provide compatible AArch64 GPU binaries.
 - Reset the implementation language — removed the Rust source, tests, Cargo metadata, and generated build artifacts, then replanned the application as modular Python with separate Jetson and USB-camera adapters.
 - Refresh ignored files — replaced the obsolete Rust target rule with macOS, Zed, Python, virtual-environment, build, test-cache, coverage, and local-environment patterns.
 - Fix the Python source boundary — made `src/uav_vision/` the required location for every application module and entry point.
@@ -73,3 +58,18 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Locate the branch-content difference — confirmed remote `main` differs only by its tracked root-level `yolo26n.pt`, while local model files are untracked under `models/`.
 - Define model-weight cleanup — selected a repository-wide `*.pt` ignore rule and a protected update of the outdated remote history, pending design approval.
 - Ignore model weights — added a repository-wide `*.pt` rule and verified local YOLO weight files no longer appear as untracked content.
+- Revise delegated-agent models — scoped the workflow away from Sol 6 and Sol 6.1 in favor of task-appropriate models.
+- Refine delegation policy — selected Sol 5.6 high for high-level work, Terra 6 for well-specified coding, and detailed task descriptions for reliable execution.
+- Approve the agent model policy — updated `AGENTS.md` with the agreed model selection and delegation requirements.
+- Audit the agent model policy — confirmed every requested model-selection, reasoning-effort, task-detail, and verification rule is present.
+- Audit implementation progress — verified the detection pipeline and Steps 6a–6e coverage, then identified unfinished runtime modes, scheduling, integration, and hardware validation.
+- Prepare the project test environment — synchronized the declared test group into `.venv` and verified local pytest and Ruff executables.
+- Select Step 6f — approved model-specific inference sizing, deterministic FPS limiting, and measured FPS reporting as the next implementation stage.
+- Implement Step 6f — added validated model input sizes, explicit Ultralytics sizing, uncapped or limited processing, and FPS logging and display.
+- Correct test organization — merged step-named tests into the existing CLI test module and retained component-focused coverage.
+- Restore model storage contract — routed every packaged YOLO size through `models/` for both loading and Ultralytics downloads, with component tests and documentation aligned.
+- Remove frame sequence state — eliminated sequence counters and values from capture, domain frames, logs, tests, and documentation while retaining timestamps and FPS diagnostics.
+- Audit implemented Step 6 work — verified Steps 6a–6f against their contracts and identified remaining logging-redaction, startup-reporting, scheduler-responsiveness, and model-selection verification gaps.
+- Close Step 6 audit gaps — fixed credential redaction and startup completeness, made capped waits responsive, unified model identifier and input size, enforced frame-aligned detections, and synchronized deployment documentation.
+- Preserve display aspect ratio — made optional display output uniformly fit frames within the configured resolution using black padding while leaving headless frames unchanged.
+- Review remaining work — confirmed segmentation, depth, final integration documentation, hardware validation, and Git reconciliation are still outstanding.

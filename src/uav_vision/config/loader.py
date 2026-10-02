@@ -14,6 +14,7 @@ from uav_vision.config.settings import (
     InferenceSettings,
     LogLevel,
     LogSettings,
+    ModelSettings,
     ProcessingSettings,
     ProcessingType,
     YoloSettings,
@@ -173,16 +174,30 @@ def _yolo_settings(
 ) -> YoloSettings:
     models = {}
     try:
-        for processing_name, model_values in values.items():
+        for processing_name, model_entries in values.items():
             if processing_name == "detection_filters":
                 continue
-            if not isinstance(model_values, dict):
+            if not isinstance(model_entries, dict):
                 raise ValueError("YOLO mode mappings must be objects")
             processing_type = ProcessingType(processing_name)
-            models[processing_type] = {
-                ModelSize(model_size): model_identifier
-                for model_size, model_identifier in model_values.items()
-            }
+            models[processing_type] = {}
+            for model_size, model_data in model_entries.items():
+                if not isinstance(model_data, dict):
+                    raise ValueError("YOLO model settings must be objects")
+                required = {"identifier", "input_size"}
+                missing = required - set(model_data)
+                if missing:
+                    raise ValueError(
+                        "YOLO model settings must define {}".format(sorted(missing)[0])
+                    )
+                unknown = set(model_data) - required
+                if unknown:
+                    raise ValueError(
+                        "Unknown YOLO model setting: {}".format(sorted(unknown)[0])
+                    )
+                models[processing_type][ModelSize(model_size)] = ModelSettings(
+                    model_data["identifier"], model_data["input_size"]
+                )
     except (TypeError, ValueError) as error:
         raise ValueError("Invalid YOLO configuration: {}".format(error)) from error
     filter_values = values.get("detection_filters", {})
@@ -221,7 +236,7 @@ def _validate_resolved(
 ) -> AppSettings:
     if validate_model:
         try:
-            settings.model_identifier
+            settings.model
         except ValueError as error:
             raise ValueError(
                 "Invalid resolved configuration: {}".format(error)
@@ -249,18 +264,22 @@ def apply_overrides(
 ) -> AppSettings:
     if not isinstance(settings, AppSettings):
         raise ValueError("base settings are invalid")
-    values = {} if overrides is None else _override_mapping(
-        overrides,
-        "configuration",
-        {
-            "capture",
-            "processing",
-            "inference",
-            "display",
-            "log_level",
-            "log_path",
-            "fps",
-        },
+    values = (
+        {}
+        if overrides is None
+        else _override_mapping(
+            overrides,
+            "configuration",
+            {
+                "capture",
+                "processing",
+                "inference",
+                "display",
+                "log_level",
+                "log_path",
+                "fps",
+            },
+        )
     )
     try:
         capture_values = _override_mapping(
@@ -284,7 +303,9 @@ def apply_overrides(
             values.get("inference", {}), "inference", {"model_size", "device"}
         )
         inference = InferenceSettings(
-            ModelSize(inference_values.get("model_size", settings.inference.model_size)),
+            ModelSize(
+                inference_values.get("model_size", settings.inference.model_size)
+            ),
             inference_values.get("device", settings.inference.device),
         )
         display_values = _override_mapping(
@@ -325,7 +346,9 @@ def apply_overrides(
                 filter_values.get("top_k", filters.top_k),
             )
         except (TypeError, ValueError) as error:
-            raise ValueError("Invalid explicit YOLO overrides: {}".format(error)) from error
+            raise ValueError(
+                "Invalid explicit YOLO overrides: {}".format(error)
+            ) from error
         resolved = replace(
             resolved,
             yolo=YoloSettings(

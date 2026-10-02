@@ -56,7 +56,7 @@ def test_open_cv_camera_structurally_implements_frame_source():
 
 
 @pytest.mark.parametrize("camera_type", ["opencv", "gstreamer"])
-def test_camera_returns_frames_with_sequence_and_utc_timestamp(camera_type):
+def test_camera_returns_frames_with_utc_timestamp(camera_type):
     capture = FakeVideoCapture(reads=((True, image()), (True, image())))
     camera = create_camera(camera_type, capture)
 
@@ -64,8 +64,7 @@ def test_camera_returns_frames_with_sequence_and_utc_timestamp(camera_type):
     second = camera.read()
 
     assert first.image.shape == (4, 6, 3)
-    assert first.sequence == 0
-    assert second.sequence == 1
+    assert second.image.shape == (4, 6, 3)
     assert first.captured_at.tzinfo is timezone.utc
     assert first.captured_at <= datetime.now(timezone.utc)
 

@@ -108,7 +108,7 @@ Do not initially add a dependency-injection framework, alternate image library, 
 - Define the `FrameSource` protocol with explicit frame, end-of-stream, failure, and cleanup behavior.
 - Implement OpenCV capture for numeric USB-camera indexes, video paths, and supported stream URLs.
 - Implement Jetson GStreamer capture as a separate adapter using OpenCV's GStreamer backend.
-- Assign monotonically increasing sequence numbers and capture timestamps.
+- Assign capture timestamps to frames.
 - Validate captured image layout before creating an application `Frame`.
 - Make cleanup idempotent and usable from a context manager.
 
@@ -366,14 +366,14 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 - Expose `--camera-type {opencv,gstreamer}` and keep `opencv` as the default until a later workplan revision explicitly changes camera selection.
 - Replace a numeric `--camera-source` with the accurately named `--camera-index`; accept a non-negative integer and default it to `0` for OpenCV capture. Keep a textual GStreamer pipeline or other non-index source in configuration rather than calling it an index.
 - Accept only `cpu` and `cuda` for `--device`, with `cpu` in the packaged defaults. Report unavailable requested CUDA explicitly and never fall back silently.
-- Accept `--fps` as a positive integer with packaged default `30`. In this substep it becomes validated immutable configuration; Step 6f applies the limit to the processing loop.
+- Accept `--fps` as a non-negative integer with packaged default `30`. Zero selects uncapped processing at the hardware's available rate; Step 6f applies positive limits to the processing loop.
 - Parse configuration and processing mode before constructing the final parser so help lists common groups plus only options relevant to `detection`, `segmentation`, or `depth`.
-- Remove `--model-path` and the corresponding application setting. Resolve the model exclusively from processing type plus `--model-size`; an Ultralytics identifier may be downloaded or loaded from its normal cache.
+- Remove `--model-path` and the corresponding application setting. Resolve the model exclusively from processing type plus `--model-size`; packaged Ultralytics identifiers use the project `models/` directory for both loading and downloading.
 - Keep provider-specific identifiers and target TensorRT engine references inside the YOLO configuration and model resolver so another provider can be added without changing CLI contracts.
 - Route every entry point through the same configuration loader and model resolver. Do not construct a partial `AppSettings` directly from parser defaults, because that bypasses packaged application and YOLO defaults.
 - Complete configuration and model resolution before constructing runtime components or writing the startup record. The selected processing type and model size must always resolve a YOLO origin and concrete model identifier.
 - Make the single startup record report the complete effective configuration, including camera type and index or configured source, processing type, model size and resolved model identifier, device, FPS, display enabled state and dimensions, logging level and destination, and YOLO configuration origin. Optional values must be reported as an explicit state such as `disabled` or `console`, not as missing unresolved defaults.
-- Do not add a project `models/` directory until the project actually owns local model artifacts.
+- Keep downloaded and locally optimized model artifacts under the project `models/` directory.
 - Preserve `uav-vision-usb` as a compatibility alias using OpenCV camera index `0` unless explicitly overridden.
 
 #### Verification
@@ -381,7 +381,7 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 - General and mode-specific help expose clearly named groups, with display dimensions in the display group and only the selected mode's processing options.
 - CLI values override configuration without treating omitted arguments as overrides.
 - Defaults resolve to camera type `opencv`, camera index `0`, device `cpu`, and `fps` `30`.
-- Negative or non-integer camera indexes, non-positive or non-integer FPS values, invalid display dimensions, and devices other than `cpu` or `cuda` fail descriptively.
+- Negative or non-integer camera indexes, negative or non-integer FPS values, invalid display dimensions, and devices other than `cpu` or `cuda` fail descriptively.
 - CLI and settings contain no model-path option; each processing type and model size resolves to one configured Ultralytics identifier or target engine reference.
 - A no-argument launch passes through packaged defaults and logs their fully resolved effective values exactly once; required fields such as device, FPS, YOLO origin, and selected model are never logged as `None`.
 - Configuration-file and CLI overrides produce the same startup fields with their effective overridden values, while an omitted log path is reported as the `console` destination and disabled display is reported explicitly.
@@ -410,6 +410,8 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 - Apply the configured FPS as an upper bound on completed processing iterations using a monotonic clock and an injected wait/clock boundary that can be tested without real delays.
 - Define one iteration as inference followed by mandatory logging and, when enabled, display output. Wait only for the unused part of the `1 / fps` period; when work already exceeds the period, continue immediately without overlapping iterations or accumulating delay.
 - In headless mode, cap inference plus logging. With display enabled, cap inference plus logging plus display using the same scheduler; do not create separate output rates.
+- Treat configured FPS `0` as uncapped processing and never wait between iterations.
+- Measure the effective frame rate between completed iteration starts, report it in every per-frame log record, and overlay it when display is enabled.
 - Keep stop requests, end-of-stream, interruptions, failures, and cleanup responsive and preserve the existing timing ownership used by debug diagnostics.
 
 #### Verification
@@ -418,9 +420,10 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 - The startup record contains that resolved input size and never reports a different size from the one passed to inference.
 - Inference calls receive the selected model's input size for consecutive frames and for models with different configured sizes.
 - Results remain aligned with the source frame while optional display independently uses its configured width and height.
-- A default run uses 30 FPS, an explicit positive integer overrides it, and invalid values fail during configuration.
+- A default run uses 30 FPS, an explicit positive integer overrides it, zero runs uncapped, and invalid values fail during configuration.
 - Deterministic clock tests prove that fast iterations wait for the remainder, slow iterations do not wait, and deadlines do not accumulate drift.
 - Headless tests include inference and logging inside the capped iteration; display tests additionally include display work inside the same cap.
+- Per-frame logs and display output report the measured FPS, with an explicit unavailable state before a second frame establishes a period.
 - Shutdown and cleanup do not wait for an unnecessary next-frame deadline.
 
 ### Step 6g: Semantic segmentation

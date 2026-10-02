@@ -33,7 +33,6 @@ class OpenCvCamera:
 
         self._capture: Optional[Any] = None
         self._closed = False
-        self._sequence = 0
         self._is_file_source = isinstance(source, str) and "://" not in source
 
         try:
@@ -58,9 +57,7 @@ class OpenCvCamera:
                 return None
             raise CaptureReadError("Unable to read camera frame")
 
-        frame = frame_from_image(image, self._sequence)
-        self._sequence += 1
-        return frame
+        return frame_from_image(image)
 
     def close(self) -> None:
         if self._closed:

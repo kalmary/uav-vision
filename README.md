@@ -5,8 +5,9 @@ Ultralytics YOLO model. With the optional display enabled, it draws class
 labels and bounding boxes on the live image. Without the display, the same
 capture and inference pipeline runs headlessly.
 
-The default model is `yolo26n.pt`, the smallest configured detection model.
-The first use may download its weights through Ultralytics.
+The default model is `models/yolo26n.pt`, the smallest configured detection
+model. The first use downloads missing weights through Ultralytics into the
+project's `models/` directory.
 
 ## Laptop and USB camera
 
@@ -50,9 +51,9 @@ TensorRT engines are tied to their target hardware and runtime. Build and use
 the Jetson engine according to the separate deployment guide rather than
 copying a laptop-built engine.
 
-The current headless mode performs capture and inference without emitting a
-per-frame result. Filtered detection logging, including an optional log-file
-path, is planned separately.
+Headless mode writes the resolved startup configuration and filtered detection
+results with measured FPS to the console. `--log-path` writes the same records
+to a file, and `--fps 0` runs without an application-imposed frame-rate limit.
 
 ## Dependency profiles
 

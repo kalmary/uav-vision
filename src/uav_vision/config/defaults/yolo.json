@@ -1,10 +1,25 @@
 {
   "detection": {
-    "nano": "yolo26n.pt",
-    "small": "yolo26s.pt",
-    "medium": "yolo26m.pt",
-    "large": "yolo26l.pt",
-    "xlarge": "yolo26x.pt"
+    "nano": {
+      "identifier": "models/yolo26n.pt",
+      "input_size": 640
+    },
+    "small": {
+      "identifier": "models/yolo26s.pt",
+      "input_size": 640
+    },
+    "medium": {
+      "identifier": "models/yolo26m.pt",
+      "input_size": 640
+    },
+    "large": {
+      "identifier": "models/yolo26l.pt",
+      "input_size": 640
+    },
+    "xlarge": {
+      "identifier": "models/yolo26x.pt",
+      "input_size": 640
+    }
   },
   "detection_filters": {
     "selected_classes": [],

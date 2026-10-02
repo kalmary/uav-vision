@@ -12,9 +12,11 @@ from uav_vision.config.models import ModelSize
 from uav_vision.config.settings import (
     AppSettings,
     CaptureSettings,
+    DetectionFilterSettings,
     DisplaySettings,
     LogLevel,
     LogSettings,
+    ModelSettings,
     ProcessingType,
     YoloSettings,
 )
@@ -56,7 +58,8 @@ class DisplayBackend:
 
     def resize(self, image, dimensions):
         self.resize_calls.append((image, dimensions))
-        return ("resized", image, dimensions)
+        width, height = dimensions
+        return np.full((height, width, 3), image[0, 0], dtype=image.dtype)
 
     def imshow(self, window_name, image):
         self.imshow_calls.append((window_name, image))
@@ -74,7 +77,6 @@ class DisplayBackend:
 def frame():
     return Frame(
         image=np.full((20, 30, 3), 17, dtype=np.uint8),
-        sequence=8,
         captured_at=datetime(2026, 9, 21, 12, 30, tzinfo=timezone.utc),
     )
 
@@ -96,12 +98,19 @@ def detection(
     )
 
 
-def processed_frame(detections=()):
+def processed_frame(detections=(), frames_per_second=None):
     values = tuple(detections)
     return ProcessedFrame(
         frame=frame(),
         result=DetectionResult(values),
-        diagnostics=ProcessingDiagnostics(None, 0.0, None, len(values), len(values)),
+        diagnostics=ProcessingDiagnostics(
+            None,
+            0.0,
+            None,
+            len(values),
+            len(values),
+            frames_per_second,
+        ),
     )
 
 
@@ -124,8 +133,11 @@ def test_log_writes_resolved_startup_configuration_and_redacts_url_credentials()
     assert stream.getvalue() == (
         "startup camera.type=opencv camera.source=rtsp://***@camera.local/live "
         "processing.type=detection inference.model_size=nano "
-        "inference.model=yolo26n.pt "
-        "inference.device=cpu runtime.fps=30 display.enabled=false "
+        "inference.model=models/yolo26n.pt "
+        "inference.input_size=640 inference.device=cpu runtime.fps=30 "
+        "detection.selected_classes=all detection.minimum_confidence=0.0 "
+        "detection.top_k=unlimited "
+        "display.enabled=false "
         "display.width=1280 display.height=720 logging.level=basic "
         "logging.destination=console "
         "yolo.origin=package:uav_vision.config.defaults/yolo.json\n"
@@ -152,20 +164,44 @@ def test_log_writes_to_a_configured_file_and_closes_it_after_flushing(tmp_path):
     assert path.read_text(encoding="utf-8").startswith("startup camera.type=opencv")
 
 
-def test_log_startup_reports_yolo_origin_and_selected_model():
+def test_log_startup_reports_yolo_origin_and_selected_model_pair():
     stream = StringIO()
     settings = AppSettings(
         yolo=YoloSettings(
             path=None,
             origin="packaged defaults",
-            models={ProcessingType.DETECTION: {ModelSize.NANO: "yolo26n.pt"}},
+            models={
+                ProcessingType.DETECTION: {
+                    ModelSize.NANO: ModelSettings("models/yolo26n.pt", 512)
+                }
+            },
         )
     )
 
     LogOutput(LogSettings(), stream=stream).startup(settings)
 
-    assert "inference.model=yolo26n.pt" in stream.getvalue()
+    assert "inference.model=models/yolo26n.pt" in stream.getvalue()
+    assert "inference.input_size=512" in stream.getvalue()
     assert "yolo.origin=packaged defaults" in stream.getvalue()
+
+
+def test_log_startup_reports_effective_detection_filters():
+    stream = StringIO()
+    configured = resolved_settings()
+    configured = replace(
+        configured,
+        yolo=replace(
+            configured.yolo,
+            detection_filters=DetectionFilterSettings((2, 5), 0.6, 3),
+        ),
+    )
+
+    LogOutput(LogSettings(), stream=stream).startup(configured)
+
+    assert (
+        "detection.selected_classes=2,5 detection.minimum_confidence=0.6 "
+        "detection.top_k=3"
+    ) in stream.getvalue()
 
 
 def test_log_propagates_file_open_failures(tmp_path):
@@ -175,7 +211,7 @@ def test_log_propagates_file_open_failures(tmp_path):
         LogOutput(LogSettings(path=path))
 
 
-def test_log_debug_frame_record_contains_frame_identity_counts_and_owned_timings():
+def test_log_debug_frame_record_contains_timestamp_counts_and_owned_timings():
     stream = StringIO()
     output = LogOutput(LogSettings(level=LogLevel.DEBUG), stream=stream)
     processed = ProcessedFrame(
@@ -187,8 +223,8 @@ def test_log_debug_frame_record_contains_frame_identity_counts_and_owned_timings
     assert output.write(processed) is False
 
     assert stream.getvalue() == (
-        "frame sequence=8 detections=[]\n"
-        "frame sequence=8 captured_at=2026-09-21T12:30:00+00:00 "
+        "frame fps=unavailable detections=[]\n"
+        "frame captured_at=2026-09-21T12:30:00+00:00 "
         "dimensions=30x20 raw_count=4 retained_count=2 "
         "capture_duration=0.010000 inference_duration=0.020000 "
         "processing_duration=0.030000\n"
@@ -204,7 +240,8 @@ def test_log_basic_frame_record_reports_each_retained_detection_in_order():
     output.write(processed_frame((first, second)))
 
     assert stream.getvalue() == (
-        "frame sequence=8 detections=[class=person confidence=0.900000 "
+        "frame fps=unavailable "
+        "detections=[class=person confidence=0.900000 "
         "bbox=(1.2,14.7,18.4,19.2), class=bus confidence=0.750000 "
         "bbox=(1.2,14.7,18.4,19.2)]\n"
     )
@@ -215,7 +252,17 @@ def test_log_basic_frame_record_reports_an_explicit_empty_detection_result():
 
     LogOutput(LogSettings(), stream=stream).write(processed_frame())
 
-    assert stream.getvalue() == "frame sequence=8 detections=[]\n"
+    assert stream.getvalue() == "frame fps=unavailable detections=[]\n"
+
+
+def test_log_basic_frame_record_reports_measured_fps():
+    stream = StringIO()
+
+    LogOutput(LogSettings(), stream=stream).write(
+        processed_frame(frames_per_second=24.5)
+    )
+
+    assert stream.getvalue() == "frame fps=24.50 detections=[]\n"
 
 
 def test_log_debug_diagnostic_includes_exception_traceback():
@@ -518,6 +565,40 @@ def test_log_debug_diagnostic_redacts_url_credentials():
     assert "secret" not in stream.getvalue()
 
 
+def test_log_redacts_same_line_at_signs_in_url_credentials():
+    stream = StringIO()
+    output = LogOutput(LogSettings(level=LogLevel.DEBUG), stream=stream)
+
+    output.diagnostic(
+        "capture",
+        "initialized source=rtsp://pilot:sec@ret@camera.local/live",
+    )
+
+    record = stream.getvalue()
+    assert "rtsp://***@camera.local/live" in record
+    assert "sec" not in record
+    assert "ret" not in record
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "rtsp://pilot:sec@ret word@camera.local/live",
+        "rtsp://pilot:123/secret@camera.local/live",
+    ],
+)
+def test_log_redacts_complete_malformed_url_credentials(source):
+    stream = StringIO()
+    output = LogOutput(LogSettings(level=LogLevel.DEBUG), stream=stream)
+
+    output.diagnostic("capture", "initialized source=" + source)
+
+    assert stream.getvalue() == (
+        "diagnostic component=capture event=initialized "
+        "source=rtsp://***@camera.local/live\n"
+    )
+
+
 def test_log_close_flushes_but_does_not_close_a_borrowed_stream():
     class Stream:
         def __init__(self):
@@ -558,7 +639,8 @@ def test_display_annotates_a_copy_and_shows_the_requested_dimensions():
                 right=15.8,
                 bottom=12.6,
             ),
-        )
+        ),
+        frames_per_second=24.5,
     )
     original = source.frame.image.copy()
 
@@ -573,12 +655,42 @@ def test_display_annotates_a_copy_and_shows_the_requested_dimensions():
         (annotated, (3, 2), (16, 13), (0, 255, 0), 2),
     ]
     assert backend.text_calls == [
+        (annotated, "FPS: 24.50", (10, 20), 7, 0.5, (255, 255, 255), 1),
         (annotated, "car 0.75", (1, 5), 7, 0.5, (0, 255, 0), 1),
         (annotated, "bus 0.75", (3, 0), 7, 0.5, (0, 255, 0), 1),
     ]
-    assert backend.resize_calls == [(annotated, (640, 480))]
-    assert backend.imshow_calls == [("UAV Vision", ("resized", annotated, (640, 480)))]
+    assert backend.resize_calls == [(annotated, (640, 427))]
+    assert backend.imshow_calls[0][0] == "UAV Vision"
+    assert backend.imshow_calls[0][1].shape == (480, 640, 3)
     assert backend.wait_key_calls == [1]
+
+
+def test_display_letterboxes_wide_frames_without_distortion():
+    backend = DisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=60, height=60), backend=backend)
+
+    output.write(processed_frame())
+
+    displayed = backend.imshow_calls[0][1]
+    assert backend.resize_calls[0][1] == (60, 40)
+    assert displayed.shape == (60, 60, 3)
+    assert np.all(displayed[:10] == 0)
+    assert np.all(displayed[10:50] == 17)
+    assert np.all(displayed[50:] == 0)
+
+
+def test_display_pillarboxes_frames_for_wide_resolutions_without_distortion():
+    backend = DisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=90, height=30), backend=backend)
+
+    output.write(processed_frame())
+
+    displayed = backend.imshow_calls[0][1]
+    assert backend.resize_calls[0][1] == (45, 30)
+    assert displayed.shape == (30, 90, 3)
+    assert np.all(displayed[:, :22] == 0)
+    assert np.all(displayed[:, 22:67] == 17)
+    assert np.all(displayed[:, 67:] == 0)
 
 
 @pytest.mark.parametrize("key", [ord("q"), ord("Q"), 27])
