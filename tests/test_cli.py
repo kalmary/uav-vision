@@ -1,5 +1,6 @@
 import json
 from io import StringIO
+from pathlib import Path
 
 import pytest
 
@@ -11,7 +12,7 @@ from uav_vision.config.settings import CameraType, ProcessingType
 from uav_vision.output.log import LogOutput
 
 
-def test_cli_loads_packaged_defaults_and_reports_resolved_startup_values():
+def test_cli_loads_default_files_and_reports_resolved_startup_values():
     settings = parse_args([])
 
     assert settings.capture.camera_type is CameraType.OPENCV
@@ -36,8 +37,8 @@ def test_cli_loads_packaged_defaults_and_reports_resolved_startup_values():
         "display.enabled=false "
         "display.width=1280 display.height=720 logging.level=basic "
         "logging.destination=console "
-        "yolo.origin=package:uav_vision.config.defaults/yolo.yaml\n"
-    )
+        "yolo.origin={0}\n"
+    ).format(Path(__file__).resolve().parents[1] / "config" / "yolo.yaml")
 
 
 def test_cli_uses_only_explicit_arguments_as_configuration_overrides(tmp_path):
@@ -314,8 +315,8 @@ def test_startup_uses_custom_configuration_and_cli_override_values(tmp_path):
         "display.enabled=true "
         "display.width=960 display.height=540 logging.level=debug "
         "logging.destination=console "
-        "yolo.origin=package:uav_vision.config.defaults/yolo.yaml\n"
-    )
+        "yolo.origin={0}\n"
+    ).format(Path(__file__).resolve().parents[1] / "config" / "yolo.yaml")
 
 
 def test_cli_reads_selected_configuration_once_and_uses_the_same_base_for_mode(
@@ -346,7 +347,12 @@ def test_cli_reads_selected_configuration_once_and_uses_the_same_base_for_mode(
         ]
     )
 
-    assert reads == [path]
+    config_directory = Path(__file__).resolve().parents[1] / "config"
+    assert reads == [
+        config_directory / "app.yaml",
+        config_directory / "yolo.yaml",
+        path,
+    ]
     assert settings.processing.processing_type is ProcessingType.DETECTION
     assert settings.yolo.detection_filters.selected_classes == (3,)
 

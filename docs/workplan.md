@@ -236,8 +236,8 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 #### Files
 
 - `pyproject.toml`
-- `src/uav_vision/config/defaults/app.yaml`
-- `src/uav_vision/config/defaults/yolo.yaml`
+- `config/app.yaml`
+- `config/yolo.yaml`
 - `src/uav_vision/config/loader.py`
 - `src/uav_vision/config/settings.py`
 - configuration tests under `tests/`
@@ -250,7 +250,7 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 - Merge settings with the fixed precedence: explicit CLI values, selected user configuration, then packaged defaults.
 - Permit partial user files while rejecting missing files, unknown keys, invalid types, invalid enum values, and invalid mode-specific combinations.
 - Resolve a relative YOLO configuration path relative to its application configuration file.
-- Mark YAML defaults as package data so installed and editable environments behave the same.
+- Keep user-editable YAML defaults at the project root under `config/`, include them as installed data files, and resolve them independently of the working directory.
 
 #### Verification
 
@@ -321,7 +321,7 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 
 #### Files
 
-- `src/uav_vision/config/defaults/yolo.yaml`
+- `config/yolo.yaml`
 - `src/uav_vision/config/settings.py`
 - `src/uav_vision/processing/detection.py`
 - `src/uav_vision/output/log.py`
@@ -349,8 +349,8 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 
 - `src/uav_vision/config/cli.py`
 - `src/uav_vision/config/models.py`
-- `src/uav_vision/config/defaults/app.yaml`
-- `src/uav_vision/config/defaults/yolo.yaml`
+- `config/app.yaml`
+- `config/yolo.yaml`
 - `src/uav_vision/config/loader.py`
 - `src/uav_vision/config/settings.py`
 - `src/uav_vision/app.py`
@@ -393,7 +393,7 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 
 #### Files
 
-- `src/uav_vision/config/defaults/yolo.yaml`
+- `config/yolo.yaml`
 - `src/uav_vision/config/models.py`
 - `src/uav_vision/config/settings.py`
 - `src/uav_vision/inference/ultralytics.py`

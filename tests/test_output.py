@@ -3,6 +3,7 @@ import traceback
 from dataclasses import replace
 from datetime import datetime, timezone
 from io import StringIO
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -216,8 +217,8 @@ def test_log_writes_resolved_startup_configuration_and_redacts_url_credentials()
         "display.enabled=false "
         "display.width=1280 display.height=720 logging.level=basic "
         "logging.destination=console "
-        "yolo.origin=package:uav_vision.config.defaults/yolo.yaml\n"
-    )
+        "yolo.origin={0}\n"
+    ).format(Path(__file__).resolve().parents[1] / "config" / "yolo.yaml")
 
     with pytest.raises(RuntimeError, match="already written"):
         output.startup(configured)

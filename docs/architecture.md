@@ -18,66 +18,85 @@ Every run reports its effective configuration and mode-specific results through 
 
 ## Project structure
 
-All application code lives under `src/uav_vision/`. The repository root contains project metadata and documentation; tests live under `tests/`.
+All application code lives under `src/uav_vision/`. Editable configuration,
+project metadata, and documentation live at the repository root; tests live
+under `tests/`.
 
 ```text
-src/uav_vision/
-├── __init__.py
-├── app.py
-├── pipeline.py
+.
 ├── config/
+│   ├── app.yaml
+│   └── yolo.yaml
+├── models/
+├── src/uav_vision/
 │   ├── __init__.py
-│   ├── cli.py
-│   ├── loader.py
-│   ├── models.py
-│   ├── settings.py
-│   └── defaults/
-│       ├── app.yaml
-│       └── yolo.yaml
-├── domain/
-│   ├── __init__.py
-│   ├── depth.py
-│   ├── detection.py
-│   ├── frame.py
-│   └── segmentation.py
-├── capture/
-│   ├── __init__.py
-│   ├── base.py
-│   ├── gstreamer.py
-│   └── opencv.py
-├── inference/
-│   ├── __init__.py
-│   ├── base.py
-│   ├── ultralytics.py
-│   └── ultralytics_depth.py
-├── processing/
-│   ├── __init__.py
-│   ├── base.py
-│   ├── depth.py
-│   ├── detection.py
-│   └── segmentation.py
-├── output/
-│   ├── __init__.py
-│   ├── base.py
-│   ├── display.py
-│   └── log.py
-└── entrypoints/
-    ├── __init__.py
-    ├── main.py
-    └── usb_camera.py
+│   ├── app.py
+│   ├── pipeline.py
+│   ├── config/
+│   │   ├── __init__.py
+│   │   ├── cli.py
+│   │   ├── loader.py
+│   │   ├── models.py
+│   │   └── settings.py
+│   ├── domain/
+│   │   ├── __init__.py
+│   │   ├── depth.py
+│   │   ├── detection.py
+│   │   ├── frame.py
+│   │   └── segmentation.py
+│   ├── capture/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── gstreamer.py
+│   │   └── opencv.py
+│   ├── inference/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── ultralytics.py
+│   │   └── ultralytics_depth.py
+│   ├── processing/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── depth.py
+│   │   ├── detection.py
+│   │   └── segmentation.py
+│   ├── output/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── display.py
+│   │   └── log.py
+│   └── entrypoints/
+│       ├── __init__.py
+│       ├── main.py
+│       └── usb_camera.py
+└── tests/
 ```
 
 This is the implemented source structure. Detection and semantic segmentation share `inference/ultralytics.py`. Tests remain under `tests/`, including end-to-end integration tests with deterministic camera and provider doubles.
 
 ## Configuration
 
-The package supplies editable YAML defaults in `config/defaults/app.yaml` and `config/defaults/yolo.yaml`. Application defaults cover capture, processing mode, display, logging, and the path to the YOLO configuration. YOLO defaults map every supported mode and model size to an Ultralytics model identifier or a validated target-specific engine. PyYAML's safe loader reads the configuration as data without constructing arbitrary Python objects.
+The source checkout owns one readily accessible pair of editable YAML defaults:
+`config/app.yaml` and `config/yolo.yaml`. Application defaults cover capture,
+processing mode, inference, display, logging, FPS, and the path to the YOLO
+configuration. YOLO defaults map every supported mode and model size to an
+Ultralytics model identifier and input size, and contain detection filters.
+PyYAML's safe loader reads configuration as data without constructing arbitrary
+Python objects.
+
+For source runs, the loader locates the root `config/` directory from the
+project location, independently of the current working directory. A built
+installation places the two files under `share/uav-vision/config` and locates
+them through the installed distribution's file metadata. This keeps default
+lookup independent of the launch directory without duplicating defaults inside
+the Python package. Editing a checkout changes runs that use that checkout, not
+an unrelated installed copy.
 
 Configuration is resolved in this order, from highest to lowest priority:
 
 1. explicitly provided CLI arguments;
 2. values from the file selected by `--config-path`;
-3. packaged default files.
+3. the shipped application and YOLO defaults.
 
 A user configuration may be partial. Unknown keys, invalid types, invalid enum values, and impossible mode-specific combinations are errors rather than silently ignored values. A relative YOLO configuration path is resolved relative to the application configuration that contains it. The fully resolved settings are validated once and are immutable during processing.
 
@@ -118,13 +137,13 @@ objects do not cross the adapter boundary.
 
 The depth adapter uses the Ultralytics `depth` task and copies its source-sized
 floating-point map into `DepthResult`. YOLO26 depth predictions are in metres,
-so the adapter retains raw values with unit `metre` and scale `1.0`. Packaged
+so the adapter retains raw values with unit `metre` and scale `1.0`. Default
 depth models use input size `768`, with `models/yolo26n-depth.pt` as the default.
 `DepthResult` computes its minimum, maximum, mean, and population standard
 deviation once from the retained immutable map. Statistics describe raw values;
 the unit and scale are reported alongside them.
 
-Model-size aliases and mode-specific model mappings come from the YOLO configuration; each size mapping atomically owns its model identifier and input size. The public CLI selects a supported size rather than an arbitrary model path. Packaged identifiers resolve under the project `models/` directory so Ultralytics loads existing weights there and downloads missing weights there. A target-specific TensorRT engine can be configured for Jetson without exposing provider details elsewhere.
+Model-size aliases and mode-specific model mappings come from the YOLO configuration; each size mapping atomically owns its model identifier and input size. The public CLI selects a supported size rather than an arbitrary model path. Default identifiers resolve under the project `models/` directory so Ultralytics loads existing weights there and downloads missing weights there. A target-specific TensorRT engine can be configured for Jetson without exposing provider details elsewhere.
 
 ### Processing mode
 
@@ -168,7 +187,7 @@ At `debug`, the logger includes everything from `basic` plus capture timestamps 
 
 ## Entry points
 
-- `uav-vision` exposes the complete CLI with OpenCV camera index `0` as its packaged default.
+- `uav-vision` exposes the complete CLI with OpenCV camera index `0` as its shipped default.
 - `uav-vision-usb` is a laptop-friendly alias with the same defaults and model, display, processing, configuration, and logging options.
 
 Both entry points call the same application composition and processing pipeline.
@@ -176,7 +195,7 @@ Both entry points call the same application composition and processing pipeline.
 ## Data flow
 
 1. An entry point reads the configuration path and processing mode needed to build mode-aware CLI help.
-2. The loader merges packaged defaults, the selected configuration file, and explicit CLI values, then validates one effective configuration.
+2. The loader merges the shipped defaults, the selected configuration file, and explicit CLI values, then validates one effective configuration.
 3. `app` constructs the logger and reports the effective launch configuration once.
 4. `app` selects a camera source and constructs the mode-specific inference adapter and processor, reporting initialization diagnostics through the logger.
 5. `pipeline` reads one frame, measures capture, and passes the frame to the processor.

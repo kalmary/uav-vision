@@ -2,7 +2,6 @@ import json
 import subprocess
 import sys
 import zipfile
-from importlib import resources
 from pathlib import Path
 from shutil import copy2, copytree, ignore_patterns, which
 
@@ -20,24 +19,70 @@ from uav_vision.config.settings import (
     ProcessingType,
 )
 
-PACKAGED_NANO_MODELS = {
+DEFAULT_NANO_MODELS = {
     "detection": ("models/yolo26n.pt", 640),
     "segmentation": ("models/yolo26n-sem.pt", 640),
     "depth": ("models/yolo26n-depth.pt", 768),
 }
 
 
-def assert_packaged_model_mappings(values):
-    for processing_type, expected in PACKAGED_NANO_MODELS.items():
+def assert_default_model_mappings(values):
+    for processing_type, expected in DEFAULT_NANO_MODELS.items():
         model = values[processing_type]["nano"]
         assert (model["identifier"], model["input_size"]) == expected
 
 
+def test_default_configuration_path_points_to_the_project_config_directory():
+    project_root = Path(__file__).parents[1]
+
+    assert loader._default_config_path() == project_root / "config" / "app.yaml"
+
+
+def test_installed_default_configuration_path_uses_distribution_metadata(
+    tmp_path, monkeypatch
+):
+    installation = tmp_path / "environment"
+    installed_loader = installation / "lib" / "uav_vision" / "config" / "loader.py"
+    config_path = installation / "share" / "uav-vision" / "config" / "app.yaml"
+
+    class Distribution:
+        files = (
+            Path("share/uav-vision/config/app.yaml.backup"),
+            Path("share/uav-vision/config/app.yaml"),
+        )
+
+        def locate_file(self, file):
+            return installation / file
+
+    monkeypatch.setattr(loader, "__file__", str(installed_loader))
+    monkeypatch.setattr(loader.metadata, "distribution", lambda name: Distribution())
+
+    assert loader._default_config_path() == config_path
+
+
+def test_installed_default_configuration_requires_distribution_metadata(
+    tmp_path, monkeypatch
+):
+    installed_loader = (
+        tmp_path / "environment" / "lib" / "uav_vision" / "config" / "loader.py"
+    )
+
+    def missing_distribution(name):
+        raise loader.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(loader, "__file__", str(installed_loader))
+    monkeypatch.setattr(loader.metadata, "distribution", missing_distribution)
+
+    with pytest.raises(ValueError, match="Unable to locate the default configuration"):
+        loader._default_config_path()
+
+
 def test_packaged_defaults_provide_basic_log_level_from_app_configuration():
     settings = load_settings()
+    config_directory = Path(__file__).parents[1] / "config"
 
     app_defaults = yaml.safe_load(
-        resources.read_text("uav_vision.config.defaults", "app.yaml")
+        (config_directory / "app.yaml").read_text(encoding="utf-8")
     )
 
     assert app_defaults["log_level"] == "basic"
@@ -56,6 +101,8 @@ def test_partial_user_configuration_preserves_display_defaults(tmp_path):
     assert settings.display is not None
     assert settings.display.width == 960
     assert settings.display.height == 720
+    assert settings.yolo is not None
+    assert settings.yolo.path == Path(__file__).parents[1] / "config" / "yolo.yaml"
 
 
 def test_genuine_yaml_configuration_resolves_a_relative_yolo_file(tmp_path):
@@ -167,12 +214,13 @@ def test_complete_user_configuration_replaces_packaged_defaults(tmp_path):
     assert settings.yolo.origin == str(yolo_path)
 
 
-def test_editable_package_resources_expose_both_default_files():
-    app_defaults = resources.read_text("uav_vision.config.defaults", "app.yaml")
-    yolo_defaults = resources.read_text("uav_vision.config.defaults", "yolo.yaml")
+def test_project_config_directory_exposes_both_default_files():
+    config_directory = Path(__file__).parents[1] / "config"
+    app_defaults = (config_directory / "app.yaml").read_text(encoding="utf-8")
+    yolo_defaults = (config_directory / "yolo.yaml").read_text(encoding="utf-8")
 
     assert yaml.safe_load(app_defaults)["log_level"] == "basic"
-    assert_packaged_model_mappings(yaml.safe_load(yolo_defaults))
+    assert_default_model_mappings(yaml.safe_load(yolo_defaults))
 
 
 def test_user_configuration_rejects_non_boolean_display_enabled(tmp_path):
@@ -391,70 +439,67 @@ def test_yolo_detection_filters_are_loaded_as_immutable_settings(tmp_path):
     assert settings.yolo.detection_filters == DetectionFilterSettings((2, 5), 0.6, 3)
 
 
-def test_packaged_defaults_are_read_without_a_temporary_resource_path(monkeypatch):
-    def unexpected_resource_path(*args, **kwargs):
-        raise AssertionError("loader must not expose a temporary resource path")
-
-    monkeypatch.setattr(loader.resources, "path", unexpected_resource_path)
+def test_default_settings_are_read_outside_the_project_working_directory(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
 
     settings = load_settings()
 
+    default_yolo_path = Path(__file__).parents[1] / "config" / "yolo.yaml"
     assert settings.yolo is not None
-    assert settings.yolo.path is None
-    assert settings.yolo.origin == "package:uav_vision.config.defaults/yolo.yaml"
+    assert settings.yolo.path == default_yolo_path
+    assert settings.yolo.origin == str(default_yolo_path)
     assert settings.yolo.detection_filters == DetectionFilterSettings()
 
 
-def test_packaged_app_yolo_path_selects_the_named_packaged_configuration(
-    monkeypatch,
+def test_default_app_yolo_path_selects_the_named_default_configuration(
+    tmp_path, monkeypatch
 ):
-    read_text = loader.resources.read_text
-
-    def packaged_text(package, name):
-        if name == "app.yaml":
-            values = yaml.safe_load(read_text(package, name))
-            values["yolo_config_path"] = "alternate-yolo.yaml"
-            return yaml.safe_dump(values)
-        if name == "alternate-yolo.yaml":
-            return yaml.safe_dump(
-                {
-                    "detection": {
-                        "nano": {"identifier": "alternate.pt", "input_size": 320}
-                    }
-                }
-            )
-        return read_text(package, name)
-
-    monkeypatch.setattr(loader.resources, "read_text", packaged_text)
+    config_directory = Path(__file__).parents[1] / "config"
+    app_values = yaml.safe_load(
+        (config_directory / "app.yaml").read_text(encoding="utf-8")
+    )
+    app_values["capture"]["source"] = 7
+    app_values["yolo_config_path"] = "alternate-yolo.yaml"
+    app_path = tmp_path / "app.yaml"
+    app_path.write_text(yaml.safe_dump(app_values), encoding="utf-8")
+    yolo_values = yaml.safe_load(
+        (config_directory / "yolo.yaml").read_text(encoding="utf-8")
+    )
+    yolo_values["detection"]["nano"] = {
+        "identifier": "alternate.pt",
+        "input_size": 320,
+    }
+    yolo_path = tmp_path / "alternate-yolo.yaml"
+    yolo_path.write_text(yaml.safe_dump(yolo_values), encoding="utf-8")
+    monkeypatch.setattr(loader, "_default_config_path", lambda: app_path)
 
     settings = load_settings()
 
+    assert settings.capture.source == 7
     assert settings.yolo is not None
-    assert settings.yolo.path is None
-    assert (
-        settings.yolo.origin == "package:uav_vision.config.defaults/alternate-yolo.yaml"
-    )
+    assert settings.yolo.path == yolo_path
+    assert settings.yolo.origin == str(yolo_path)
     assert (
         settings.yolo.models[ProcessingType.DETECTION][ModelSize.NANO].identifier
         == "alternate.pt"
     )
 
 
-def test_packaged_yolo_model_without_input_size_is_rejected(monkeypatch):
-    read_text = loader.resources.read_text
-
-    def packaged_text(package, name):
-        if name == "app.yaml":
-            values = yaml.safe_load(read_text(package, name))
-            values["yolo_config_path"] = "alternate-yolo.yaml"
-            return yaml.safe_dump(values)
-        if name == "alternate-yolo.yaml":
-            return yaml.safe_dump(
-                {"detection": {"nano": {"identifier": "alternate.pt"}}}
-            )
-        return read_text(package, name)
-
-    monkeypatch.setattr(loader.resources, "read_text", packaged_text)
+def test_default_yolo_model_without_input_size_is_rejected(tmp_path, monkeypatch):
+    config_directory = Path(__file__).parents[1] / "config"
+    app_values = yaml.safe_load(
+        (config_directory / "app.yaml").read_text(encoding="utf-8")
+    )
+    app_values["yolo_config_path"] = "invalid-yolo.yaml"
+    app_path = tmp_path / "app.yaml"
+    app_path.write_text(yaml.safe_dump(app_values), encoding="utf-8")
+    (tmp_path / "invalid-yolo.yaml").write_text(
+        yaml.safe_dump({"detection": {"nano": {"identifier": "alternate.pt"}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(loader, "_default_config_path", lambda: app_path)
 
     with pytest.raises(ValueError, match="input_size"):
         load_settings()
@@ -598,7 +643,9 @@ def test_yolo_configuration_rejects_invalid_input_size(tmp_path, input_size):
         load_settings(config_path)
 
 
-def test_built_wheel_contains_yaml_packaged_default_files(tmp_path):
+def test_built_wheel_installs_top_level_yaml_defaults_without_source_leakage(
+    tmp_path,
+):
     project_root = Path(__file__).parents[1]
     build_root = tmp_path / "project"
     copytree(
@@ -606,11 +653,13 @@ def test_built_wheel_contains_yaml_packaged_default_files(tmp_path):
         build_root / "src",
         ignore=ignore_patterns("*.egg-info", "__pycache__"),
     )
+    copytree(project_root / "config", build_root / "config")
     copy2(project_root / "pyproject.toml", build_root / "pyproject.toml")
+    output_directory = tmp_path / "dist"
     uv_path = which("uv")
     assert uv_path is not None
     result = subprocess.run(
-        [uv_path, "build", "--wheel", "--out-dir", str(tmp_path)],
+        [uv_path, "build", "--wheel", "--out-dir", str(output_directory)],
         cwd=build_root,
         check=False,
         capture_output=True,
@@ -618,18 +667,26 @@ def test_built_wheel_contains_yaml_packaged_default_files(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
-    wheel_path = next(tmp_path.glob("uav_vision-*.whl"))
+    wheel_path = next(output_directory.glob("uav_vision-*.whl"))
     with zipfile.ZipFile(wheel_path) as wheel:
         names = set(wheel.namelist())
-        yolo_defaults = yaml.safe_load(
-            wheel.read("uav_vision/config/defaults/yolo.yaml").decode("utf-8")
+        app_entry = next(
+            name
+            for name in names
+            if name.endswith(".data/data/share/uav-vision/config/app.yaml")
         )
+        yolo_entry = next(
+            name
+            for name in names
+            if name.endswith(".data/data/share/uav-vision/config/yolo.yaml")
+        )
+        yolo_defaults = yaml.safe_load(wheel.read(yolo_entry).decode("utf-8"))
 
-    assert "uav_vision/config/defaults/app.yaml" in names
-    assert "uav_vision/config/defaults/yolo.yaml" in names
-    assert "uav_vision/config/defaults/app.json" not in names
-    assert "uav_vision/config/defaults/yolo.json" not in names
-    assert_packaged_model_mappings(yolo_defaults)
+    assert app_entry
+    assert yolo_entry
+    assert not any("uav_vision/config/defaults" in name for name in names)
+    assert not any(name.endswith(("app.json", "yolo.json")) for name in names)
+    assert_default_model_mappings(yolo_defaults)
 
     installation = tmp_path / "installed"
     installed = subprocess.run(
@@ -648,24 +705,39 @@ def test_built_wheel_contains_yaml_packaged_default_files(tmp_path):
     )
     assert installed.returncode == 0, installed.stderr
 
+    runtime_directory = tmp_path / "runtime"
+    runtime_directory.mkdir()
     isolated = subprocess.run(
         [
             sys.executable,
+            "-I",
             "-c",
             (
-                "import sys, yaml; "
+                "import sys; "
                 "sys.path.insert(0, sys.argv[1]); "
                 "import uav_vision; "
-                "from importlib import resources; "
                 "assert sys.argv[1] in uav_vision.__file__; "
-                "yaml.safe_load(resources.read_text("
-                "'uav_vision.config.defaults', 'app.yaml')); "
-                "yaml.safe_load(resources.read_text("
-                "'uav_vision.config.defaults', 'yolo.yaml'))"
+                "from uav_vision.config.loader import load_settings; "
+                "expected = {'detection': ('models/yolo26n.pt', 640), "
+                "'segmentation': ('models/yolo26n-sem.pt', 640), "
+                "'depth': ('models/yolo26n-depth.pt', 768)}; "
+                "settings = [load_settings(overrides={'processing': "
+                "{'processing_type': mode}}) for mode in expected]; "
+                "assert all((value.model.identifier, value.model.input_size) "
+                "== expected[value.processing.processing_type.value] "
+                "for value in settings); "
+                "expected_path = (__import__('pathlib').Path(sys.argv[1]) / "
+                "'share/uav-vision/config/yolo.yaml').resolve(); "
+                "paths = [value.yolo.path.resolve() for value in settings]; "
+                "assert all(path == expected_path for path in paths); "
+                "assert all(value.yolo.origin == str(expected_path) "
+                "for value in settings); "
+                "assert all(sys.argv[2] not in str(path) for path in paths)"
             ),
             str(installation),
+            str(project_root),
         ],
-        cwd=tmp_path,
+        cwd=runtime_directory,
         check=False,
         capture_output=True,
         text=True,

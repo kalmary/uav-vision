@@ -1,5 +1,5 @@
 from dataclasses import replace
-from importlib import resources
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -20,8 +20,6 @@ from uav_vision.config.settings import (
     ProcessingType,
     YoloSettings,
 )
-
-_DEFAULTS_PACKAGE = "uav_vision.config.defaults"
 
 
 def cuda_available() -> bool:
@@ -60,28 +58,21 @@ def _read_yaml(path: Path) -> Mapping[str, Any]:
         ) from error
 
 
-def _packaged_origin(name: str) -> str:
-    return "package:{}/{}".format(_DEFAULTS_PACKAGE, name)
+def _default_config_path() -> Path:
+    project_root = Path(__file__).resolve().parents[3]
+    if (project_root / "pyproject.toml").is_file():
+        return project_root / "config" / "app.yaml"
 
-
-def _packaged_resource_name(value: Any) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError("YOLO configuration path must be a non-empty string")
-    path = Path(value)
-    if path.is_absolute() or any(part in {".", ".."} for part in path.parts):
-        raise ValueError("Packaged YOLO configuration path must be relative")
-    return value
-
-
-def _read_packaged_yaml(name: str) -> Mapping[str, Any]:
-    origin = _packaged_origin(name)
     try:
-        text = resources.read_text(_DEFAULTS_PACKAGE, name)
-    except FileNotFoundError as error:
-        raise ValueError(
-            "Configuration file does not exist: {}".format(origin)
-        ) from error
-    return _parse_yaml(text, origin)
+        distribution = metadata.distribution("uav-vision")
+    except metadata.PackageNotFoundError as error:
+        raise ValueError("Unable to locate the default configuration") from error
+
+    suffix = ("share", "uav-vision", "config", "app.yaml")
+    for file in distribution.files or ():
+        if Path(str(file)).parts[-len(suffix) :] == suffix:
+            return Path(distribution.locate_file(file)).resolve()
+    raise ValueError("The uav-vision distribution is missing its default configuration")
 
 
 def _merge(
@@ -371,10 +362,19 @@ def load_settings(
     validate_model: bool = True,
     check_cuda: bool = True,
 ) -> AppSettings:
-    app_defaults = _read_packaged_yaml("app.yaml")
-    yolo_resource = _packaged_resource_name(app_defaults.get("yolo_config_path"))
-    yolo_defaults = _read_packaged_yaml(yolo_resource)
-    default_yolo = _yolo_settings(None, _packaged_origin(yolo_resource), yolo_defaults)
+    default_app_path = _default_config_path()
+    app_defaults = _read_yaml(default_app_path)
+    default_yolo_path = _resolve_path(
+        app_defaults.get("yolo_config_path"),
+        default_app_path.parent,
+        "YOLO configuration path",
+    )
+    yolo_defaults = _read_yaml(default_yolo_path)
+    default_yolo = _yolo_settings(
+        default_yolo_path,
+        str(default_yolo_path),
+        yolo_defaults,
+    )
     _validate_app_layer(app_defaults, {}, "packaged defaults", default_yolo)
 
     selected_path = None if config_path is None else Path(config_path)

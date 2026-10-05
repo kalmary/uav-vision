@@ -14,7 +14,7 @@ The Rust implementation was removed. The project is planned as a modular Python 
 ## Current decisions
 
 - Python replaces Rust for the application implementation.
-- All application code belongs under `src/uav_vision/`; only tests, metadata, and documentation live outside `src/`.
+- All application code belongs under `src/uav_vision/`; user-editable YAML defaults live in the top-level `config/` directory alongside tests, metadata, and documentation.
 - Camera sources, inference providers, processing modes, and outputs use small replaceable interfaces.
 - Laptop and USB cameras receive a dedicated entry point backed by the shared pipeline.
 - Jetson acceleration uses an Ultralytics-compatible TensorRT engine validated on the target device.
@@ -23,8 +23,6 @@ The Rust implementation was removed. The project is planned as a modular Python 
 
 ## Work Log
 
-- Preserve optional Jetson display — confirmed the shared `--display` configuration and documented use of JetPack-provided GUI OpenCV without the desktop extra.
-- Summarize implementation status — confirmed that Step 1 is complete and camera, inference, pipeline, display implementation, and Jetson validation remain pending.
 - Scope the next implementation step — reviewed all Markdown and code, defined the Step 2 capture contract, and requested approval before coding.
 - Approve Step 2 implementation — added replaceable OpenCV and GStreamer capture with explicit errors, cleanup, and automated tests.
 - Continue with Step 3 — reviewed the documentation and implemented replaceable YOLO inference and detection processing test-first.
@@ -73,3 +71,5 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Clarify default configuration ownership — documented the existing packaged application and YOLO files as the source of runtime defaults, with custom files optional and CLI values acting only as explicit overrides.
 - Switch configuration to YAML — replaced packaged JSON defaults with `app.yaml` and `yolo.yaml`, recorded PyYAML as a runtime dependency, retained precedence and validation, updated examples, and verified safe parsing plus isolated wheel installation.
 - Verify CLI retention — confirmed all CLI options remain available and explicit arguments override YAML defaults while omitted arguments retain configuration values; all CLI tests passed.
+- Review remaining functionality — found no missing feature in the agreed local scope; Jetson compatibility, acceleration, camera validation, and deployment documentation remain deferred, as does automatic camera discovery.
+- Expose configuration at the project root — moved the canonical YAML defaults to `config/app.yaml` and `config/yolo.yaml`, updated loading, installed data files, tests, and documentation, and verified CLI precedence plus source and installed-wheel lookup independently of the working directory.

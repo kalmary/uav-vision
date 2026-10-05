@@ -14,13 +14,16 @@ enabled, while the OpenCV display is optional.
 
 ```text
 .
+├── config/
+│   ├── app.yaml                Editable application defaults
+│   └── yolo.yaml               Editable model mappings and detection filters
 ├── docs/                       Architecture, work plan, and deployment notes
 ├── models/                     Downloaded weights and local model artifacts
 ├── src/uav_vision/
 │   ├── app.py                  Runtime composition
 │   ├── pipeline.py             Capture, processing, output, and FPS loop
 │   ├── capture/                OpenCV and GStreamer camera adapters
-│   ├── config/                 CLI, settings, loading, and packaged YAML defaults
+│   ├── config/                 CLI, typed settings, and configuration loading
 │   ├── domain/                 Frames and mode-specific result types
 │   ├── entrypoints/            `uav-vision` and `uav-vision-usb`
 │   ├── inference/              Ultralytics provider adapters
@@ -66,7 +69,7 @@ the console:
 uv run uav-vision
 ```
 
-`uav-vision-usb` is a compatibility alias with the same options. Packaged
+`uav-vision-usb` is a compatibility alias with the same options. Shipped
 defaults already select OpenCV camera index `0`, and either entry point can
 override it explicitly:
 
@@ -90,18 +93,18 @@ to stop.
 
 ## Processing modes and models
 
-The packaged default for every mode is the `nano` size. Model identifiers are
+The shipped default for every mode is the `nano` size. Model identifiers are
 kept under `models/`; Ultralytics loads an existing artifact there or obtains
 the missing weights on first use.
 
-| Mode | Packaged nano model | Inference input size | Basic per-frame result |
+| Mode | Default nano model | Inference input size | Basic per-frame result |
 | --- | --- | ---: | --- |
 | Detection | `models/yolo26n.pt` | 640 | Retained class name, confidence, and bounding box, or an explicit empty result |
 | Semantic segmentation | `models/yolo26n-sem.pt` | 640 | Number of unique classes present in the class map |
 | Depth | `models/yolo26n-depth.pt` | 768 | Minimum, maximum, mean, and population standard deviation |
 
 Depth values use metres with scale `1.0`. The other available aliases are
-`small`, `medium`, `large`, and `xlarge`; the packaged mappings use input size
+`small`, `medium`, `large`, and `xlarge`; the shipped mappings use input size
 640 for detection and segmentation and 768 for depth.
 
 Detection with class IDs `0` or `2`, confidence at least `0.4`, and at most the
@@ -136,21 +139,26 @@ uv run uav-vision \
 
 Both configuration files already ship with the application:
 
-- `src/uav_vision/config/defaults/app.yaml` defines capture, mode, model size,
-  device, display, logging, FPS, and the YOLO configuration path.
-- `src/uav_vision/config/defaults/yolo.yaml` defines the models, inference input
-  sizes, and detection filters.
+- `config/app.yaml` defines capture, mode, model size, device, display, logging,
+  FPS, and the YOLO configuration path.
+- `config/yolo.yaml` defines the models, inference input sizes, and detection
+  filters.
 
 A normal `uv run uav-vision` automatically reads these files. No custom file
 needs to be created. The CLI takes its defaults from the configuration files
 and overrides only the options explicitly supplied on the command line. The
-shipped `app.yaml` points to the packaged `yolo.yaml`.
+shipped `app.yaml` points to `yolo.yaml`. In a source checkout, the loader finds
+the root `config/` directory from the project location rather than the current
+working directory, so the files can be edited directly. An installed wheel
+uses its installed copies under `share/uav-vision/config`, located from the
+installed distribution metadata. Editing a checkout does not change the files
+belonging to an unrelated installed copy.
 
 Configuration is resolved from highest to lowest priority:
 
 1. options explicitly supplied on the command line;
 2. a partial application file selected with `--config-path`;
-3. the packaged application and YOLO defaults.
+3. the shipped application and YOLO defaults.
 
 For optional custom settings, create a partial application file that overrides
 only the values needed for a run, for example `config/uav.yaml`:
@@ -238,7 +246,7 @@ help groups:
 | logging | `--log-path PATH` | Append logs to a file instead of the console. |
 | runtime | `--fps FPS` | Set a non-negative processing-rate cap; `0` is uncapped. |
 
-Packaged defaults are detection, nano, OpenCV camera index `0`, CPU, display
+Shipped defaults are detection, nano, OpenCV camera index `0`, CPU, display
 disabled at 1280×720, basic console logging, and a 30 FPS cap. Display dimensions
 do not change the model's configured inference input size.
 

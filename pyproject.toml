@@ -28,8 +28,8 @@ headless = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools.package-data]
-"uav_vision.config.defaults" = ["*.yaml"]
+[tool.setuptools.data-files]
+"share/uav-vision/config" = ["config/app.yaml", "config/yolo.yaml"]
 
 [tool.ruff]
 target-version = "py38"
