@@ -1,6 +1,7 @@
 import subprocess
 import sys
 from datetime import datetime, timezone
+from io import StringIO
 
 import numpy as np
 import pytest
@@ -135,6 +136,39 @@ def test_delivers_the_same_processed_frame_to_all_outputs_before_stopping():
     assert first_output.calls[0].frame is processed.frame
     assert first_output.calls[0].result is processed.result
     assert events == ["first", "second"]
+
+
+def test_depth_pipeline_logs_statistics_and_shares_the_unchanged_result():
+    from uav_vision.config.settings import LogSettings
+    from uav_vision.output.log import LogOutput
+    from uav_vision.processing.depth import DepthProcessor
+
+    input_frame = frame()
+    depth_map = np.full((12, 16), 2.0, dtype=np.float32)
+    depth_map[:, 8:] = 4.0
+    result = DepthResult(depth_map, "metre", 1.0)
+
+    class Estimator:
+        def estimate_depth(self, captured):
+            assert captured is input_frame
+            return result
+
+    stream = StringIO()
+    second_output = OutputDouble()
+    run_pipeline(
+        SourceDouble((input_frame,)),
+        DepthProcessor(Estimator()),
+        (LogOutput(LogSettings(), stream=stream), second_output),
+    )
+
+    assert second_output.calls[0].result is result
+    assert second_output.calls[0].frame is input_frame
+    assert "depth.minimum=2.000000" in stream.getvalue()
+    assert "depth.maximum=4.000000" in stream.getvalue()
+    assert "depth.mean=3.000000" in stream.getvalue()
+    assert "depth.standard_deviation=1.000000" in stream.getvalue()
+    assert np.array_equal(result.depth_map, depth_map)
+    assert not result.depth_map.flags.writeable
 
 
 def test_does_not_read_another_frame_after_an_output_requests_stop():

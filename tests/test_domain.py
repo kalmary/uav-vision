@@ -214,8 +214,67 @@ def test_depth_result_owns_an_immutable_depth_map():
 
     assert result.depth_map is not depth_map
     assert result.depth_map[0, 0] == 1.0
+    assert result.depth_map.dtype == np.float32
+    assert result.depth_map.shape == (1, 2)
+    assert result.depth_map.flags.c_contiguous
+    assert result.minimum == 1.0
+    assert result.maximum == 2.0
+    assert result.mean == 1.5
+    assert result.standard_deviation == 0.5
     with pytest.raises(ValueError):
         result.depth_map[0, 0] = 9.0
+    with pytest.raises(ValueError):
+        result.depth_map.setflags(write=True)
+    with pytest.raises(ValueError):
+        result.depth_map[:, :1].setflags(write=True)
+
+
+def test_depth_result_computes_constant_map_statistics_once():
+    depth_map = np.full((2, 3), 4.5, dtype=np.float32)
+
+    result = DepthResult(depth_map, "metre", 1.0)
+    depth_map.fill(9.0)
+
+    assert result.minimum == 4.5
+    assert result.maximum == 4.5
+    assert result.mean == 4.5
+    assert result.standard_deviation == 0.0
+
+
+def test_depth_result_computes_varying_map_population_statistics():
+    result = DepthResult(
+        np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        "metre",
+        1.0,
+    )
+
+    assert result.minimum == 1.0
+    assert result.maximum == 4.0
+    assert result.mean == 2.5
+    assert result.standard_deviation == pytest.approx(1.118033988749895)
+
+
+def test_depth_result_uses_float64_statistics_without_changing_the_raw_map():
+    result = DepthResult(
+        np.array([[65504.0, 65504.0]], dtype=np.float16),
+        "metre",
+        1.0,
+    )
+
+    assert result.depth_map.dtype == np.float16
+    assert result.mean == 65504.0
+    assert result.standard_deviation == 0.0
+
+
+def test_depth_result_statistics_are_frozen_derived_fields():
+    depth_map = np.ones((1, 1), dtype=np.float32)
+
+    with pytest.raises(TypeError):
+        DepthResult(depth_map, "metre", 1.0, minimum=0.0)
+
+    result = DepthResult(depth_map, "metre", 1.0)
+    with pytest.raises(AttributeError):
+        result.minimum = 0.0
 
 
 @pytest.mark.parametrize(

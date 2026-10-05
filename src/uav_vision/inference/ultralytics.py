@@ -2,8 +2,16 @@ import math
 from numbers import Real
 from typing import Any, Callable, Optional, Tuple
 
+import numpy as np
+
 from uav_vision.config.settings import InferenceSettings
-from uav_vision.domain import BoundingBox, Detection, Frame
+from uav_vision.domain import (
+    BoundingBox,
+    Detection,
+    Frame,
+    SegmentationClass,
+    SegmentationResult,
+)
 
 from .base import (
     InferenceInitializationError,
@@ -16,6 +24,12 @@ def _load_model(model_identifier: str) -> Any:
     from ultralytics import YOLO
 
     return YOLO(model_identifier, task="detect")
+
+
+def _load_segmentation_model(model_identifier: str) -> Any:
+    from ultralytics import YOLO
+
+    return YOLO(model_identifier, task="semantic")
 
 
 def _tensor_values(tensor: Any) -> list:
@@ -66,6 +80,25 @@ def _validate_names(names: Any) -> dict:
         ):
             raise InferenceResultError("Model returned invalid class names")
     return names
+
+
+def _semantic_map(tensor: Any, frame: Frame) -> np.ndarray:
+    try:
+        values = tensor.cpu().numpy()
+    except Exception as error:
+        raise InferenceResultError(
+            "Model returned an invalid semantic class map"
+        ) from error
+    if (
+        not isinstance(values, np.ndarray)
+        or values.ndim != 2
+        or values.size == 0
+        or not np.issubdtype(values.dtype, np.integer)
+        or np.any(values < 0)
+        or values.shape != frame.image.shape[:2]
+    ):
+        raise InferenceResultError("Model returned an invalid semantic class map")
+    return np.array(values, copy=True, order="C")
 
 
 class UltralyticsDetector:
@@ -171,3 +204,74 @@ class UltralyticsDetector:
             )
         except (TypeError, ValueError, OverflowError) as error:
             raise InferenceResultError("Model returned an invalid detection") from error
+
+
+class UltralyticsSegmenter:
+    def __init__(
+        self,
+        settings: InferenceSettings,
+        model_identifier: str,
+        input_size: int,
+        model_factory: Optional[Callable[..., Any]] = None,
+    ) -> None:
+        self._device = settings.device
+        self._input_size = input_size
+        try:
+            self._model = (
+                model_factory(model_identifier, task="semantic")
+                if model_factory is not None
+                else _load_segmentation_model(model_identifier)
+            )
+        except Exception as error:
+            raise InferenceInitializationError(
+                "Unable to load semantic segmentation model"
+            ) from error
+
+    def segment(self, frame: Frame) -> SegmentationResult:
+        arguments = {
+            "source": frame.image,
+            "verbose": False,
+            "imgsz": self._input_size,
+            "device": self._device,
+        }
+        try:
+            results = self._model.predict(**arguments)
+        except Exception as error:
+            raise InferenceRunError("Unable to run semantic segmentation") from error
+        if not isinstance(results, list) or len(results) != 1:
+            raise InferenceResultError("Model must return one segmentation result")
+        return self._segmentation_from_result(results[0], frame)
+
+    @staticmethod
+    def _segmentation_from_result(result: Any, frame: Frame) -> SegmentationResult:
+        try:
+            semantic_mask = result.semantic_mask
+            names = result.names
+        except Exception as error:
+            raise InferenceResultError(
+                "Model returned an invalid segmentation result"
+            ) from error
+        if semantic_mask is None:
+            raise InferenceResultError("Model returned a missing semantic class map")
+        try:
+            data = semantic_mask.data
+        except Exception as error:
+            raise InferenceResultError(
+                "Model returned an invalid semantic class map"
+            ) from error
+        if data is None:
+            raise InferenceResultError("Model returned a missing semantic class map")
+
+        class_map = _semantic_map(data, frame)
+        names = _validate_names(names)
+        classes = []
+        for value in np.unique(class_map):
+            class_id = int(value)
+            try:
+                class_name = names[class_id]
+            except KeyError as error:
+                raise InferenceResultError(
+                    "Model returned an unknown class identifier"
+                ) from error
+            classes.append(SegmentationClass(class_id, class_name))
+        return SegmentationResult(class_map, tuple(classes))

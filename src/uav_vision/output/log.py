@@ -3,8 +3,15 @@ import sys
 import traceback
 from typing import Optional, TextIO
 
+import numpy as np
+
 from uav_vision.config.settings import AppSettings, LogLevel, LogSettings
-from uav_vision.domain import DetectionResult, ProcessedFrame
+from uav_vision.domain import (
+    DepthResult,
+    DetectionResult,
+    ProcessedFrame,
+    SegmentationResult,
+)
 
 _SOURCE_CREDENTIAL = re.compile(
     r"(?i)(?P<prefix>(?:^|[?&;,\s])(?:user(?:[-_]?id|name)?|user[-_]?pw|"
@@ -177,13 +184,13 @@ class LogOutput:
     def write(self, processed: ProcessedFrame) -> bool:
         if self._closed:
             raise RuntimeError("Log output is closed")
+        frames_per_second = processed.diagnostics.frames_per_second
+        fps = (
+            "unavailable"
+            if frames_per_second is None
+            else "{0:.2f}".format(frames_per_second)
+        )
         if isinstance(processed.result, DetectionResult):
-            frames_per_second = processed.diagnostics.frames_per_second
-            fps = (
-                "unavailable"
-                if frames_per_second is None
-                else "{0:.2f}".format(frames_per_second)
-            )
             detections = ", ".join(
                 "class={0} confidence={1:.6f} bbox=({2},{3},{4},{5})".format(
                     detection.class_name,
@@ -201,9 +208,33 @@ class LogOutput:
                     detections,
                 )
             )
+        elif isinstance(processed.result, SegmentationResult):
+            self._write(
+                "frame fps={0} segmentation.classes={1}".format(
+                    fps,
+                    len(np.unique(processed.result.class_map)),
+                )
+            )
+        elif isinstance(processed.result, DepthResult):
+            self._write(
+                (
+                    "frame fps={0} depth.minimum={1:.6f} "
+                    "depth.maximum={2:.6f} depth.mean={3:.6f} "
+                    "depth.standard_deviation={4:.6f} depth.unit={5} "
+                    "depth.scale={6}"
+                ).format(
+                    fps,
+                    processed.result.minimum,
+                    processed.result.maximum,
+                    processed.result.mean,
+                    processed.result.standard_deviation,
+                    processed.result.unit,
+                    processed.result.scale,
+                )
+            )
         if self._settings.level is LogLevel.DEBUG:
             diagnostics = processed.diagnostics
-            self._write(
+            record = (
                 "frame captured_at={0} dimensions={1}x{2} "
                 "raw_count={3} retained_count={4} capture_duration={5:.6f} "
                 "inference_duration={6:.6f} processing_duration={7:.6f}".format(
@@ -217,6 +248,14 @@ class LogOutput:
                     diagnostics.processing_duration,
                 )
             )
+            if isinstance(processed.result, DepthResult):
+                record = record + (
+                    " depth.raw_minimum={0:.6f} depth.raw_maximum={1:.6f}"
+                ).format(
+                    processed.result.minimum,
+                    processed.result.maximum,
+                )
+            self._write(record)
         return False
 
     def close(self) -> None:

@@ -7,7 +7,7 @@ import pytest
 
 from uav_vision.config.models import ModelSize
 from uav_vision.config.settings import InferenceSettings
-from uav_vision.domain import Frame
+from uav_vision.domain import DepthResult, Frame
 from uav_vision.inference import (
     DepthEstimator,
     Detector,
@@ -15,7 +15,9 @@ from uav_vision.inference import (
     InferenceResultError,
     InferenceRunError,
     Segmenter,
+    UltralyticsDepthEstimator,
     UltralyticsDetector,
+    UltralyticsSegmenter,
 )
 
 
@@ -44,6 +46,65 @@ class Result:
     def __init__(self, boxes, names):
         self.boxes = boxes
         self.names = names
+
+
+class SemanticTensor:
+    def __init__(self, value, cpu_error=None, numpy_error=None):
+        self.value = value
+        self.cpu_error = cpu_error
+        self.numpy_error = numpy_error
+        self.cpu_calls = 0
+
+    def cpu(self):
+        self.cpu_calls += 1
+        if self.cpu_error is not None:
+            raise self.cpu_error
+        return self
+
+    def numpy(self):
+        if self.numpy_error is not None:
+            raise self.numpy_error
+        return self.value
+
+
+class SemanticMask:
+    def __init__(self, data):
+        self.data = data
+
+
+class SemanticResult:
+    def __init__(self, class_map, names):
+        self.semantic_mask = SemanticMask(SemanticTensor(class_map))
+        self.names = names
+
+
+class DepthTensor:
+    def __init__(self, value, cpu_error=None, numpy_error=None):
+        self.value = value
+        self.cpu_error = cpu_error
+        self.numpy_error = numpy_error
+        self.cpu_calls = 0
+
+    def cpu(self):
+        self.cpu_calls += 1
+        if self.cpu_error is not None:
+            raise self.cpu_error
+        return self
+
+    def numpy(self):
+        if self.numpy_error is not None:
+            raise self.numpy_error
+        return self.value
+
+
+class DepthMap:
+    def __init__(self, data):
+        self.data = data
+
+
+class DepthResultValue:
+    def __init__(self, depth_map):
+        self.depth = DepthMap(depth_map)
 
 
 class Model:
@@ -89,6 +150,24 @@ def make_detector(model, detector_settings=None, input_size=640):
     return UltralyticsDetector(
         detector_settings or settings(),
         "models/yolo26n.pt",
+        input_size,
+        model_factory=lambda path, task: model,
+    )
+
+
+def make_segmenter(model, segmenter_settings=None, input_size=640):
+    return UltralyticsSegmenter(
+        segmenter_settings or settings(),
+        "models/yolo26n-sem.pt",
+        input_size,
+        model_factory=lambda path, task: model,
+    )
+
+
+def make_depth_estimator(model, estimator_settings=None, input_size=768):
+    return UltralyticsDepthEstimator(
+        estimator_settings or settings(),
+        "models/yolo26n-depth.pt",
         input_size,
         model_factory=lambda path, task: model,
     )
@@ -392,5 +471,391 @@ def test_detect_wraps_provider_errors_with_their_cause():
 
     with pytest.raises(InferenceRunError) as raised:
         detector.detect(frame())
+
+    assert raised.value.__cause__ is error
+
+
+def test_ultralytics_segmenter_structurally_implements_segmenter():
+    segmenter = make_segmenter(Model())
+
+    assert isinstance(segmenter, Segmenter)
+
+
+def test_segmenter_loads_the_resolved_model_for_semantic_inference():
+    calls = []
+
+    UltralyticsSegmenter(
+        InferenceSettings(),
+        "models/cached-segmenter.engine",
+        640,
+        model_factory=lambda path, task: calls.append((path, task)) or Model(),
+    )
+
+    assert calls == [("models/cached-segmenter.engine", "semantic")]
+
+
+def test_segment_uses_the_frame_image_input_size_and_device_for_consecutive_frames():
+    class_map = np.zeros((12, 16), dtype=np.int64)
+    model = Model([SemanticResult(class_map, {0: "background"})])
+    segmenter = make_segmenter(model, settings(device="cuda"), input_size=512)
+    input_frame = frame()
+
+    segmenter.segment(input_frame)
+    segmenter.segment(input_frame)
+
+    assert model.calls == [
+        {
+            "source": input_frame.image,
+            "verbose": False,
+            "imgsz": 512,
+            "device": "cuda",
+        },
+        {
+            "source": input_frame.image,
+            "verbose": False,
+            "imgsz": 512,
+            "device": "cuda",
+        },
+    ]
+
+
+def test_segment_converts_one_present_class_to_application_owned_data():
+    class_map = np.full((12, 16), 3, dtype=np.int64)
+    provider_result = SemanticResult(class_map, {1: "tree", 3: "road"})
+    segmenter = make_segmenter(Model([provider_result]))
+
+    result = segmenter.segment(frame())
+    class_map[0, 0] = 1
+    provider_result.names[3] = "changed"
+
+    assert result.class_map.shape == (12, 16)
+    assert result.class_map[0, 0] == 3
+    assert [(item.class_id, item.class_name) for item in result.classes] == [
+        (3, "road")
+    ]
+    assert result is not provider_result
+    assert provider_result.semantic_mask.data.cpu_calls == 1
+
+
+def test_segment_returns_sorted_metadata_for_only_the_present_classes():
+    class_map = np.array([[4, 1] * 8] * 12, dtype=np.int32)
+    segmenter = make_segmenter(
+        Model([SemanticResult(class_map, {1: "tree", 2: "sky", 4: "road"})])
+    )
+
+    result = segmenter.segment(frame())
+
+    assert [(item.class_id, item.class_name) for item in result.classes] == [
+        (1, "tree"),
+        (4, "road"),
+    ]
+
+
+def test_segment_wraps_initialization_errors_with_their_cause():
+    error = RuntimeError("load failure")
+
+    with pytest.raises(InferenceInitializationError) as raised:
+        UltralyticsSegmenter(
+            settings(),
+            "models/yolo26n-sem.pt",
+            640,
+            model_factory=lambda path, task: (_ for _ in ()).throw(error),
+        )
+
+    assert raised.value.__cause__ is error
+
+
+def test_segment_wraps_provider_errors_with_their_cause():
+    error = RuntimeError("predict failure")
+    segmenter = make_segmenter(Model(error=error))
+
+    with pytest.raises(InferenceRunError) as raised:
+        segmenter.segment(frame())
+
+    assert raised.value.__cause__ is error
+
+
+@pytest.mark.parametrize(
+    "results",
+    [
+        [],
+        [
+            SemanticResult(np.zeros((12, 16), dtype=np.int64), {0: "background"}),
+            SemanticResult(np.zeros((12, 16), dtype=np.int64), {0: "background"}),
+        ],
+        (SemanticResult(np.zeros((12, 16), dtype=np.int64), {0: "background"}),),
+    ],
+)
+def test_segment_requires_exactly_one_list_result(results):
+    segmenter = make_segmenter(Model(results))
+
+    with pytest.raises(InferenceResultError):
+        segmenter.segment(frame())
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        type("ResultWithoutSemanticMask", (), {"names": {0: "background"}})(),
+        type(
+            "ResultWithMissingSemanticMask",
+            (),
+            {"semantic_mask": None, "names": {0: "background"}},
+        )(),
+        type(
+            "ResultWithoutSemanticData",
+            (),
+            {
+                "semantic_mask": type("SemanticMaskWithoutData", (), {})(),
+                "names": {0: "background"},
+            },
+        )(),
+        type(
+            "ResultWithMissingSemanticData",
+            (),
+            {
+                "semantic_mask": type("SemanticMask", (), {"data": None})(),
+                "names": {0: "background"},
+            },
+        )(),
+    ],
+)
+def test_segment_rejects_missing_semantic_map(result):
+    segmenter = make_segmenter(Model([result]))
+
+    with pytest.raises(InferenceResultError):
+        segmenter.segment(frame())
+
+
+@pytest.mark.parametrize(
+    "class_map",
+    [
+        np.zeros((12, 16), dtype=np.float32),
+        np.zeros((1, 12, 16), dtype=np.int64),
+        np.zeros((0, 16), dtype=np.int64),
+        np.zeros((12, 15), dtype=np.int64),
+        np.full((12, 16), -1, dtype=np.int64),
+    ],
+)
+def test_segment_rejects_malformed_class_maps(class_map):
+    segmenter = make_segmenter(Model([SemanticResult(class_map, {0: "background"})]))
+
+    with pytest.raises(InferenceResultError):
+        segmenter.segment(frame())
+
+
+@pytest.mark.parametrize("names", [None, [], {0: ""}, {0: 123}, {"0": "road"}])
+def test_segment_rejects_missing_or_invalid_class_names(names):
+    segmenter = make_segmenter(
+        Model([SemanticResult(np.zeros((12, 16), dtype=np.int64), names)])
+    )
+
+    with pytest.raises(InferenceResultError):
+        segmenter.segment(frame())
+
+
+def test_segment_rejects_unknown_class_identifiers():
+    segmenter = make_segmenter(
+        Model([SemanticResult(np.full((12, 16), 2, dtype=np.int64), {1: "tree"})])
+    )
+
+    with pytest.raises(InferenceResultError):
+        segmenter.segment(frame())
+
+
+@pytest.mark.parametrize("failure_method", ["cpu", "numpy"])
+def test_segment_wraps_tensor_conversion_errors(failure_method):
+    error = RuntimeError("tensor failure")
+    tensor = SemanticTensor(
+        np.zeros((12, 16), dtype=np.int64),
+        cpu_error=error if failure_method == "cpu" else None,
+        numpy_error=error if failure_method == "numpy" else None,
+    )
+    result = SemanticResult(np.zeros((12, 16), dtype=np.int64), {0: "background"})
+    result.semantic_mask.data = tensor
+    segmenter = make_segmenter(Model([result]))
+
+    with pytest.raises(InferenceResultError) as raised:
+        segmenter.segment(frame())
+
+    assert raised.value.__cause__ is error
+
+
+def test_ultralytics_depth_estimator_structurally_implements_depth_estimator():
+    estimator = make_depth_estimator(Model())
+
+    assert isinstance(estimator, DepthEstimator)
+
+
+def test_depth_estimator_loads_the_resolved_model_for_depth_inference():
+    calls = []
+
+    UltralyticsDepthEstimator(
+        settings(),
+        "models/cached-depth.engine",
+        768,
+        model_factory=lambda path, task: calls.append((path, task)) or Model(),
+    )
+
+    assert calls == [("models/cached-depth.engine", "depth")]
+
+
+def test_depth_estimator_requires_an_explicit_input_size():
+    with pytest.raises(TypeError):
+        UltralyticsDepthEstimator(
+            settings(),
+            "models/yolo26n-depth.pt",
+            model_factory=lambda path, task: Model(),
+        )
+
+
+def test_estimate_depth_uses_frame_image_size_and_device_for_multiple_frames():
+    depth_map = np.ones((12, 16), dtype=np.float32)
+    model = Model([DepthResultValue(DepthTensor(depth_map))])
+    estimator = make_depth_estimator(model, settings(device="cuda"), input_size=512)
+    input_frame = frame()
+
+    estimator.estimate_depth(input_frame)
+    estimator.estimate_depth(input_frame)
+
+    assert model.calls == [
+        {
+            "source": input_frame.image,
+            "device": "cuda",
+            "verbose": False,
+            "imgsz": 512,
+        },
+        {
+            "source": input_frame.image,
+            "device": "cuda",
+            "verbose": False,
+            "imgsz": 512,
+        },
+    ]
+
+
+@pytest.mark.parametrize("provider_uses_numpy", [False, True])
+def test_estimate_depth_returns_application_owned_metric_depth(provider_uses_numpy):
+    depth_map = np.arange(192, dtype=np.float32).reshape(12, 16)
+    provider_map = depth_map if provider_uses_numpy else DepthTensor(depth_map)
+    provider_result = DepthResultValue(provider_map)
+    estimator = make_depth_estimator(Model([provider_result]))
+
+    result = estimator.estimate_depth(frame())
+    depth_map[0, 0] = 99.0
+
+    assert isinstance(result, DepthResult)
+    assert result is not provider_result
+    assert result.depth_map[0, 0] == 0.0
+    assert result.unit == "metre"
+    assert result.scale == 1.0
+    if not provider_uses_numpy:
+        assert provider_map.cpu_calls == 1
+
+
+def test_depth_initialization_wraps_model_factory_errors_with_their_cause():
+    error = RuntimeError("load failure")
+
+    with pytest.raises(InferenceInitializationError) as raised:
+        UltralyticsDepthEstimator(
+            settings(),
+            "models/yolo26n-depth.pt",
+            768,
+            model_factory=lambda path, task: (_ for _ in ()).throw(error),
+        )
+
+    assert raised.value.__cause__ is error
+
+
+def test_estimate_depth_wraps_provider_errors_with_their_cause():
+    error = RuntimeError("predict failure")
+    estimator = make_depth_estimator(Model(error=error))
+
+    with pytest.raises(InferenceRunError) as raised:
+        estimator.estimate_depth(frame())
+
+    assert raised.value.__cause__ is error
+
+
+@pytest.mark.parametrize(
+    "results",
+    [
+        [],
+        [
+            DepthResultValue(np.ones((12, 16), dtype=np.float32)),
+            DepthResultValue(np.ones((12, 16), dtype=np.float32)),
+        ],
+        (DepthResultValue(np.ones((12, 16), dtype=np.float32)),),
+    ],
+)
+def test_estimate_depth_requires_exactly_one_list_result(results):
+    estimator = make_depth_estimator(Model(results))
+
+    with pytest.raises(InferenceResultError):
+        estimator.estimate_depth(frame())
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        type("ResultWithoutDepth", (), {})(),
+        type("ResultWithMissingDepth", (), {"depth": None})(),
+        type("DepthWithoutData", (), {"depth": type("DepthMap", (), {})()})(),
+        type("DepthWithMissingData", (), {"depth": DepthMap(None)})(),
+    ],
+)
+def test_estimate_depth_rejects_missing_depth_data(result):
+    estimator = make_depth_estimator(Model([result]))
+
+    with pytest.raises(InferenceResultError):
+        estimator.estimate_depth(frame())
+
+
+def test_estimate_depth_wraps_results_property_errors_with_their_cause():
+    error = RuntimeError("depth result failure")
+
+    class FailingResult:
+        @property
+        def depth(self):
+            raise error
+
+    estimator = make_depth_estimator(Model([FailingResult()]))
+
+    with pytest.raises(InferenceResultError) as raised:
+        estimator.estimate_depth(frame())
+
+    assert raised.value.__cause__ is error
+
+
+@pytest.mark.parametrize(
+    "depth_map",
+    [
+        np.ones((1, 12, 16), dtype=np.float32),
+        np.ones((0, 16), dtype=np.float32),
+        np.ones((12, 15), dtype=np.float32),
+        np.ones((12, 16), dtype=np.int32),
+        np.full((12, 16), np.nan, dtype=np.float32),
+        np.full((12, 16), np.inf, dtype=np.float32),
+    ],
+)
+def test_estimate_depth_rejects_malformed_depth_maps(depth_map):
+    estimator = make_depth_estimator(Model([DepthResultValue(depth_map)]))
+
+    with pytest.raises(InferenceResultError):
+        estimator.estimate_depth(frame())
+
+
+@pytest.mark.parametrize("failure_method", ["cpu", "numpy"])
+def test_estimate_depth_wraps_tensor_conversion_errors(failure_method):
+    error = RuntimeError("depth tensor failure")
+    tensor = DepthTensor(
+        np.ones((12, 16), dtype=np.float32),
+        cpu_error=error if failure_method == "cpu" else None,
+        numpy_error=error if failure_method == "numpy" else None,
+    )
+    estimator = make_depth_estimator(Model([DepthResultValue(tensor)]))
+
+    with pytest.raises(InferenceResultError) as raised:
+        estimator.estimate_depth(frame())
 
     assert raised.value.__cause__ is error

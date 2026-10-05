@@ -118,7 +118,11 @@ def _parser(*, prog: str, processing_type: ProcessingType) -> argparse.ArgumentP
 
     logging = parser.add_argument_group("logging")
     logging.add_argument(
-        "--log-level", choices=LogLevel, type=LogLevel, default=argparse.SUPPRESS
+        "--log-level",
+        choices=LogLevel,
+        type=LogLevel,
+        metavar="{basic,debug}",
+        default=argparse.SUPPRESS,
     )
     logging.add_argument("--log-path", type=Path, default=argparse.SUPPRESS)
 
@@ -193,10 +197,6 @@ def parse_args(
     processing_type = bootstrap.processing_type or configured.processing.processing_type
     parser = _parser(prog=prog, processing_type=processing_type)
     values = parser.parse_args(arguments)
-    selected_type = getattr(values, "processing_type", processing_type)
-    if selected_type is not ProcessingType.DETECTION:
-        message = "processing type '{}' is unavailable: ".format(selected_type.value)
-        parser.error(message + "no model or processor is configured")
     try:
         return apply_overrides(
             configured,

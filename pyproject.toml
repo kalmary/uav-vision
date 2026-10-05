@@ -9,6 +9,7 @@ description = "Real-time UAV object detection"
 requires-python = ">=3.8"
 dependencies = [
     "numpy>=1.24.4",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]
@@ -28,7 +29,7 @@ headless = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-"uav_vision.config.defaults" = ["*.json"]
+"uav_vision.config.defaults" = ["*.yaml"]
 
 [tool.ruff]
 target-version = "py38"

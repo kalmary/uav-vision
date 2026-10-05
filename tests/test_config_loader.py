@@ -1,11 +1,13 @@
 import json
 import subprocess
+import sys
 import zipfile
 from importlib import resources
 from pathlib import Path
-from shutil import which
+from shutil import copy2, copytree, ignore_patterns, which
 
 import pytest
+import yaml
 
 from uav_vision.config import loader
 from uav_vision.config.loader import load_settings
@@ -18,12 +20,24 @@ from uav_vision.config.settings import (
     ProcessingType,
 )
 
+PACKAGED_NANO_MODELS = {
+    "detection": ("models/yolo26n.pt", 640),
+    "segmentation": ("models/yolo26n-sem.pt", 640),
+    "depth": ("models/yolo26n-depth.pt", 768),
+}
+
+
+def assert_packaged_model_mappings(values):
+    for processing_type, expected in PACKAGED_NANO_MODELS.items():
+        model = values[processing_type]["nano"]
+        assert (model["identifier"], model["input_size"]) == expected
+
 
 def test_packaged_defaults_provide_basic_log_level_from_app_configuration():
     settings = load_settings()
 
-    app_defaults = json.loads(
-        resources.read_text("uav_vision.config.defaults", "app.json")
+    app_defaults = yaml.safe_load(
+        resources.read_text("uav_vision.config.defaults", "app.yaml")
     )
 
     assert app_defaults["log_level"] == "basic"
@@ -42,6 +56,75 @@ def test_partial_user_configuration_preserves_display_defaults(tmp_path):
     assert settings.display is not None
     assert settings.display.width == 960
     assert settings.display.height == 720
+
+
+def test_genuine_yaml_configuration_resolves_a_relative_yolo_file(tmp_path):
+    yolo_path = tmp_path / "models.yaml"
+    yolo_path.write_text(
+        """\
+detection:
+  nano:
+    identifier: models/yaml-detector.engine
+    input_size: 320
+""",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text(
+        """\
+capture:
+  source: 4
+display:
+  enabled: true
+yolo_config_path: models.yaml
+""",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path)
+
+    assert settings.capture.source == 4
+    assert settings.display.enabled is True
+    assert settings.model.identifier == "models/yaml-detector.engine"
+    assert settings.model.input_size == 320
+    assert settings.yolo is not None
+    assert settings.yolo.path == yolo_path
+    assert settings.yolo.origin == str(yolo_path)
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    [
+        ("capture: [", "Invalid YAML"),
+        ("!!python/object/apply:os.system ['unsafe']", "Invalid YAML"),
+        ("", "YAML mapping"),
+        ("- item", "YAML mapping"),
+        ("configuration", "YAML mapping"),
+    ],
+)
+def test_configuration_rejects_invalid_yaml_and_non_mapping_roots(
+    tmp_path, contents, message
+):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        load_settings(config_path)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "1: invalid\nunknown: invalid\n",
+        "capture:\n  1: invalid\n  unknown: invalid\n",
+    ],
+)
+def test_configuration_rejects_non_string_yaml_keys(tmp_path, content):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="keys.*strings"):
+        load_settings(config_path)
 
 
 def test_complete_user_configuration_replaces_packaged_defaults(tmp_path):
@@ -85,11 +168,11 @@ def test_complete_user_configuration_replaces_packaged_defaults(tmp_path):
 
 
 def test_editable_package_resources_expose_both_default_files():
-    app_defaults = resources.read_text("uav_vision.config.defaults", "app.json")
-    yolo_defaults = resources.read_text("uav_vision.config.defaults", "yolo.json")
+    app_defaults = resources.read_text("uav_vision.config.defaults", "app.yaml")
+    yolo_defaults = resources.read_text("uav_vision.config.defaults", "yolo.yaml")
 
-    assert json.loads(app_defaults)["log_level"] == "basic"
-    assert "detection" in json.loads(yolo_defaults)
+    assert yaml.safe_load(app_defaults)["log_level"] == "basic"
+    assert_packaged_model_mappings(yaml.safe_load(yolo_defaults))
 
 
 def test_user_configuration_rejects_non_boolean_display_enabled(tmp_path):
@@ -237,6 +320,52 @@ def test_different_configured_model_sizes_resolve_as_atomic_selections(tmp_path)
     )
 
 
+@pytest.mark.parametrize(
+    ("model_size", "identifier"),
+    [
+        ("nano", "models/yolo26n-sem.pt"),
+        ("small", "models/yolo26s-sem.pt"),
+        ("medium", "models/yolo26m-sem.pt"),
+        ("large", "models/yolo26l-sem.pt"),
+        ("xlarge", "models/yolo26x-sem.pt"),
+    ],
+)
+def test_packaged_segmentation_models_resolve_with_expected_input_size(
+    model_size, identifier
+):
+    settings = load_settings(
+        overrides={
+            "processing": {"processing_type": "segmentation"},
+            "inference": {"model_size": model_size},
+        }
+    )
+
+    assert settings.model.identifier == identifier
+    assert settings.model.input_size == 640
+
+
+@pytest.mark.parametrize(
+    ("model_size", "identifier"),
+    [
+        ("nano", "models/yolo26n-depth.pt"),
+        ("small", "models/yolo26s-depth.pt"),
+        ("medium", "models/yolo26m-depth.pt"),
+        ("large", "models/yolo26l-depth.pt"),
+        ("xlarge", "models/yolo26x-depth.pt"),
+    ],
+)
+def test_packaged_depth_models_resolve_with_expected_input_size(model_size, identifier):
+    settings = load_settings(
+        overrides={
+            "processing": {"processing_type": "depth"},
+            "inference": {"model_size": model_size},
+        }
+    )
+
+    assert settings.model.identifier == identifier
+    assert settings.model.input_size == 768
+
+
 def test_yolo_detection_filters_are_loaded_as_immutable_settings(tmp_path):
     yolo_path = tmp_path / "models.json"
     yolo_path.write_text(
@@ -272,7 +401,7 @@ def test_packaged_defaults_are_read_without_a_temporary_resource_path(monkeypatc
 
     assert settings.yolo is not None
     assert settings.yolo.path is None
-    assert settings.yolo.origin == "package:uav_vision.config.defaults/yolo.json"
+    assert settings.yolo.origin == "package:uav_vision.config.defaults/yolo.yaml"
     assert settings.yolo.detection_filters == DetectionFilterSettings()
 
 
@@ -282,12 +411,12 @@ def test_packaged_app_yolo_path_selects_the_named_packaged_configuration(
     read_text = loader.resources.read_text
 
     def packaged_text(package, name):
-        if name == "app.json":
-            values = json.loads(read_text(package, name))
-            values["yolo_config_path"] = "alternate-yolo.json"
-            return json.dumps(values)
-        if name == "alternate-yolo.json":
-            return json.dumps(
+        if name == "app.yaml":
+            values = yaml.safe_load(read_text(package, name))
+            values["yolo_config_path"] = "alternate-yolo.yaml"
+            return yaml.safe_dump(values)
+        if name == "alternate-yolo.yaml":
+            return yaml.safe_dump(
                 {
                     "detection": {
                         "nano": {"identifier": "alternate.pt", "input_size": 320}
@@ -303,7 +432,7 @@ def test_packaged_app_yolo_path_selects_the_named_packaged_configuration(
     assert settings.yolo is not None
     assert settings.yolo.path is None
     assert (
-        settings.yolo.origin == "package:uav_vision.config.defaults/alternate-yolo.json"
+        settings.yolo.origin == "package:uav_vision.config.defaults/alternate-yolo.yaml"
     )
     assert (
         settings.yolo.models[ProcessingType.DETECTION][ModelSize.NANO].identifier
@@ -315,12 +444,14 @@ def test_packaged_yolo_model_without_input_size_is_rejected(monkeypatch):
     read_text = loader.resources.read_text
 
     def packaged_text(package, name):
-        if name == "app.json":
-            values = json.loads(read_text(package, name))
-            values["yolo_config_path"] = "alternate-yolo.json"
-            return json.dumps(values)
-        if name == "alternate-yolo.json":
-            return json.dumps({"detection": {"nano": {"identifier": "alternate.pt"}}})
+        if name == "app.yaml":
+            values = yaml.safe_load(read_text(package, name))
+            values["yolo_config_path"] = "alternate-yolo.yaml"
+            return yaml.safe_dump(values)
+        if name == "alternate-yolo.yaml":
+            return yaml.safe_dump(
+                {"detection": {"nano": {"identifier": "alternate.pt"}}}
+            )
         return read_text(package, name)
 
     monkeypatch.setattr(loader.resources, "read_text", packaged_text)
@@ -380,7 +511,7 @@ def test_explicit_yolo_path_is_resolved_relative_to_the_current_directory(
 @pytest.mark.parametrize(
     ("contents", "message"),
     [
-        ("{", "Invalid JSON"),
+        ("{", "Invalid YAML"),
         (json.dumps({"unknown": True}), "Unknown configuration key"),
         (json.dumps({"capture": {"source": True}}), "camera source"),
         (json.dumps({"inference": {"model_size": "unknown"}}), "Invalid application"),
@@ -467,13 +598,20 @@ def test_yolo_configuration_rejects_invalid_input_size(tmp_path, input_size):
         load_settings(config_path)
 
 
-def test_built_wheel_contains_both_packaged_default_files(tmp_path):
+def test_built_wheel_contains_yaml_packaged_default_files(tmp_path):
     project_root = Path(__file__).parents[1]
+    build_root = tmp_path / "project"
+    copytree(
+        project_root / "src",
+        build_root / "src",
+        ignore=ignore_patterns("*.egg-info", "__pycache__"),
+    )
+    copy2(project_root / "pyproject.toml", build_root / "pyproject.toml")
     uv_path = which("uv")
     assert uv_path is not None
     result = subprocess.run(
         [uv_path, "build", "--wheel", "--out-dir", str(tmp_path)],
-        cwd=project_root,
+        cwd=build_root,
         check=False,
         capture_output=True,
         text=True,
@@ -483,6 +621,54 @@ def test_built_wheel_contains_both_packaged_default_files(tmp_path):
     wheel_path = next(tmp_path.glob("uav_vision-*.whl"))
     with zipfile.ZipFile(wheel_path) as wheel:
         names = set(wheel.namelist())
+        yolo_defaults = yaml.safe_load(
+            wheel.read("uav_vision/config/defaults/yolo.yaml").decode("utf-8")
+        )
 
-    assert "uav_vision/config/defaults/app.json" in names
-    assert "uav_vision/config/defaults/yolo.json" in names
+    assert "uav_vision/config/defaults/app.yaml" in names
+    assert "uav_vision/config/defaults/yolo.yaml" in names
+    assert "uav_vision/config/defaults/app.json" not in names
+    assert "uav_vision/config/defaults/yolo.json" not in names
+    assert_packaged_model_mappings(yolo_defaults)
+
+    installation = tmp_path / "installed"
+    installed = subprocess.run(
+        [
+            uv_path,
+            "pip",
+            "install",
+            "--no-deps",
+            "--target",
+            str(installation),
+            str(wheel_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert installed.returncode == 0, installed.stderr
+
+    isolated = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys, yaml; "
+                "sys.path.insert(0, sys.argv[1]); "
+                "import uav_vision; "
+                "from importlib import resources; "
+                "assert sys.argv[1] in uav_vision.__file__; "
+                "yaml.safe_load(resources.read_text("
+                "'uav_vision.config.defaults', 'app.yaml')); "
+                "yaml.safe_load(resources.read_text("
+                "'uav_vision.config.defaults', 'yolo.yaml'))"
+            ),
+            str(installation),
+        ],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert isolated.returncode == 0, isolated.stderr

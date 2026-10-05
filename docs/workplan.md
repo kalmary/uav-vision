@@ -14,6 +14,7 @@ Package selection follows `AGENTS.md`: use popular, actively maintained librarie
 | --- | --- | --- |
 | `ultralytics` | Load YOLO models, run prediction, expose model results, and load or export supported TensorRT engines. | Primary maintained YOLO package with official Jetson support. Use the latest release demonstrated to work in the target JetPack 4 environment. Keep it behind `Detector` so provider-specific types do not escape into application code. Review its AGPL-3.0 or Enterprise licensing requirements before distribution. |
 | `numpy` | Store and validate image arrays exchanged between capture, processing, inference, and output. | Standard array representation used directly by OpenCV and Ultralytics. Treat it as a direct dependency even though Ultralytics also requires it. Use the version supplied or supported by the selected Jetson environment. |
+| `PyYAML` | Read packaged and user-supplied YAML configuration. | Use the safe loader to parse configuration as data; record the parser as a direct application dependency. |
 | `opencv-python` | Desktop and laptop USB-camera capture, resizing, annotation, and optional window display. | Dominant Python computer-vision package. Install only for desktop environments that need GUI support. |
 | `ultralytics-opencv-headless` | Ultralytics inference and OpenCV for non-Jetson environments without graphical display libraries. | Official Ultralytics headless distribution using `opencv-python-headless`. Select it instead of `ultralytics` for a generic headless installation; never install both OpenCV wheel variants in one environment. |
 
@@ -42,7 +43,7 @@ Python 3.8 is the compatibility floor for the JetPack 4 path; desktop developmen
 
 ### Standard-library components
 
-Use `argparse`, `dataclasses`, `enum`, `json`, `pathlib`, `contextlib`, and `typing.Protocol` instead of custom frameworks for CLI parsing, application data, serialization, resource cleanup, and interfaces. These are maintained Python components and keep compatibility with the Python 3.8 runtime used by the official JetPack 4 Ultralytics image. Current Typer and Pydantic releases require newer Python versions, so adding or pinning older framework releases would increase compatibility and maintenance risk without solving a complex project requirement.
+Use `argparse`, `dataclasses`, `enum`, `pathlib`, `contextlib`, and `typing.Protocol` instead of custom frameworks for CLI parsing, application data, resource cleanup, and interfaces. These are maintained Python components and keep compatibility with the Python 3.8 runtime used by the official JetPack 4 Ultralytics image. YAML configuration uses PyYAML rather than a custom parser. Current Typer and Pydantic releases require newer Python versions, so adding or pinning older framework releases would increase compatibility and maintenance risk without solving a complex project requirement.
 
 Do not initially add a dependency-injection framework, alternate image library, custom CUDA wrapper, GStreamer Python binding, logging framework, or serialization package. Add one only when an implemented requirement cannot be handled clearly by the selected packages or standard library, and record the evidence in this plan and status document.
 
@@ -235,28 +236,28 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 #### Files
 
 - `pyproject.toml`
-- `src/uav_vision/config/defaults/app.json`
-- `src/uav_vision/config/defaults/yolo.json`
+- `src/uav_vision/config/defaults/app.yaml`
+- `src/uav_vision/config/defaults/yolo.yaml`
 - `src/uav_vision/config/loader.py`
 - `src/uav_vision/config/settings.py`
 - configuration tests under `tests/`
 
 #### Work
 
-- Package readable JSON defaults for application settings and mode-specific YOLO settings.
+- Package readable YAML defaults for application settings and mode-specific YOLO settings.
 - Put `log_level: basic` in the application defaults rather than relying only on a Python default.
 - Add `LogLevel` with `basic` and `debug`, an optional log path, and paths connecting application and YOLO configuration.
 - Merge settings with the fixed precedence: explicit CLI values, selected user configuration, then packaged defaults.
 - Permit partial user files while rejecting missing files, unknown keys, invalid types, invalid enum values, and invalid mode-specific combinations.
 - Resolve a relative YOLO configuration path relative to its application configuration file.
-- Mark JSON defaults as package data so installed and editable environments behave the same.
+- Mark YAML defaults as package data so installed and editable environments behave the same.
 
 #### Verification
 
 - Packaged defaults alone produce valid settings and prove that `basic` came from the file.
 - Partial and complete user overrides preserve unspecified defaults.
 - Explicit CLI values win over both file layers.
-- Missing files, malformed JSON, unknown keys, wrong types, and invalid values fail descriptively.
+- Missing files, malformed YAML, unknown keys, wrong types, and invalid values fail descriptively.
 - Built and editable installs contain both default files.
 
 ### Step 6b: Mode-neutral result, processing, and diagnostics contracts
@@ -320,7 +321,7 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 
 #### Files
 
-- `src/uav_vision/config/defaults/yolo.json`
+- `src/uav_vision/config/defaults/yolo.yaml`
 - `src/uav_vision/config/settings.py`
 - `src/uav_vision/processing/detection.py`
 - `src/uav_vision/output/log.py`
@@ -348,8 +349,8 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 
 - `src/uav_vision/config/cli.py`
 - `src/uav_vision/config/models.py`
-- `src/uav_vision/config/defaults/app.json`
-- `src/uav_vision/config/defaults/yolo.json`
+- `src/uav_vision/config/defaults/app.yaml`
+- `src/uav_vision/config/defaults/yolo.yaml`
 - `src/uav_vision/config/loader.py`
 - `src/uav_vision/config/settings.py`
 - `src/uav_vision/app.py`
@@ -392,7 +393,7 @@ Step 6 replaces temporary silent headless processing with mandatory logging and 
 
 #### Files
 
-- `src/uav_vision/config/defaults/yolo.json`
+- `src/uav_vision/config/defaults/yolo.yaml`
 - `src/uav_vision/config/models.py`
 - `src/uav_vision/config/settings.py`
 - `src/uav_vision/inference/ultralytics.py`

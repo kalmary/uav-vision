@@ -3,9 +3,21 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
-from uav_vision.config.settings import DetectionFilterSettings
-from uav_vision.domain import BoundingBox, Detection, Frame
-from uav_vision.processing import DetectionProcessor, FrameProcessor
+from uav_vision.config.settings import DetectionFilterSettings, ProcessingType
+from uav_vision.domain import (
+    BoundingBox,
+    DepthResult,
+    Detection,
+    Frame,
+    SegmentationClass,
+    SegmentationResult,
+)
+from uav_vision.processing import (
+    DepthProcessor,
+    DetectionProcessor,
+    FrameProcessor,
+    SegmentationProcessor,
+)
 
 
 class DetectorDouble:
@@ -19,6 +31,32 @@ class DetectorDouble:
         if self.error is not None:
             raise self.error
         return self.detections
+
+
+class SegmenterDouble:
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error = error
+        self.calls = []
+
+    def segment(self, input_frame):
+        self.calls.append(input_frame)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+class DepthEstimatorDouble:
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error = error
+        self.calls = []
+
+    def estimate_depth(self, input_frame):
+        self.calls.append(input_frame)
+        if self.error is not None:
+            raise self.error
+        return self.result
 
 
 def frame():
@@ -35,6 +73,15 @@ def detection(class_id=3, confidence=0.75):
         confidence=confidence,
         bounding_box=BoundingBox(1.0, 2.0, 8.0, 10.0),
     )
+
+
+def segmentation_result(shape=(12, 16), classes=None):
+    classes = classes or (SegmentationClass(0, "background"),)
+    return SegmentationResult(np.zeros(shape, dtype=np.int64), classes)
+
+
+def depth_result(shape=(12, 16)):
+    return DepthResult(np.ones(shape, dtype=np.float32), "metre", 1.0)
 
 
 def test_detection_processor_structurally_implements_frame_processor():
@@ -175,3 +222,128 @@ def test_detection_processor_propagates_detector_errors_unchanged():
         processor.process(frame())
 
     assert raised.value is error
+
+
+def test_segmentation_processor_structurally_implements_frame_processor():
+    processor = SegmentationProcessor(SegmenterDouble(segmentation_result()))
+
+    assert isinstance(processor, FrameProcessor)
+
+
+def test_segmentation_processor_returns_the_same_frame_and_segmentation_result():
+    expected = segmentation_result()
+    segmenter = SegmenterDouble(expected)
+    processor = SegmentationProcessor(segmenter)
+    input_frame = frame()
+
+    processed = processor.process(input_frame)
+
+    assert segmenter.calls == [input_frame]
+    assert processed.frame is input_frame
+    assert processed.result is expected
+    assert processed.processing_type is ProcessingType.SEGMENTATION
+
+
+def test_segmentation_processor_counts_present_classes_in_diagnostics():
+    expected = segmentation_result(
+        classes=(
+            SegmentationClass(0, "background"),
+            SegmentationClass(2, "tree"),
+        )
+    )
+    processor = SegmentationProcessor(SegmenterDouble(expected))
+
+    processed = processor.process(frame())
+
+    assert processed.diagnostics.raw_count == 2
+    assert processed.diagnostics.retained_count == 2
+
+
+def test_segmentation_processor_measures_only_provider_inference():
+    clock_values = iter((3.0, 3.25))
+    processor = SegmentationProcessor(
+        SegmenterDouble(segmentation_result()), clock=clock_values.__next__
+    )
+
+    processed = processor.process(frame())
+
+    assert processed.diagnostics.capture_duration is None
+    assert processed.diagnostics.inference_duration == 0.25
+    assert processed.diagnostics.processing_duration is None
+    with pytest.raises(StopIteration):
+        clock_values.__next__()
+
+
+def test_segmentation_processor_stops_its_timer_before_result_validation():
+    clock_values = iter((4.0, 4.125))
+    processor = SegmentationProcessor(
+        SegmenterDouble(segmentation_result(shape=(1, 1))),
+        clock=clock_values.__next__,
+    )
+
+    with pytest.raises(ValueError, match="dimensions"):
+        processor.process(frame())
+
+    with pytest.raises(StopIteration):
+        clock_values.__next__()
+
+
+def test_segmentation_processor_propagates_segmenter_errors_unchanged():
+    error = RuntimeError("segmentation failed")
+    processor = SegmentationProcessor(SegmenterDouble(error=error))
+
+    with pytest.raises(RuntimeError) as raised:
+        processor.process(frame())
+
+    assert raised.value is error
+
+
+def test_depth_processor_structurally_implements_frame_processor():
+    processor = DepthProcessor(DepthEstimatorDouble(depth_result()))
+
+    assert isinstance(processor, FrameProcessor)
+
+
+def test_depth_processor_returns_the_same_frame_and_depth_result():
+    expected = depth_result()
+    estimator = DepthEstimatorDouble(expected)
+    processor = DepthProcessor(estimator)
+    input_frame = frame()
+
+    processed = processor.process(input_frame)
+
+    assert estimator.calls == [input_frame]
+    assert processed.frame is input_frame
+    assert processed.result is expected
+    assert processed.processing_type is ProcessingType.DEPTH
+    assert processed.diagnostics.raw_count == expected.depth_map.size
+    assert processed.diagnostics.retained_count == expected.depth_map.size
+
+
+def test_depth_processor_measures_only_provider_inference():
+    clock_values = iter((5.0, 5.375))
+    processor = DepthProcessor(
+        DepthEstimatorDouble(depth_result()), clock=clock_values.__next__
+    )
+
+    processed = processor.process(frame())
+
+    assert processed.diagnostics.capture_duration is None
+    assert processed.diagnostics.inference_duration == 0.375
+    assert processed.diagnostics.processing_duration is None
+    with pytest.raises(StopIteration):
+        clock_values.__next__()
+
+
+def test_depth_processor_propagates_estimator_errors_unchanged():
+    error = RuntimeError("depth estimation failed")
+    clock_values = iter((7.0, 8.0))
+    processor = DepthProcessor(
+        DepthEstimatorDouble(error=error), clock=clock_values.__next__
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        processor.process(frame())
+
+    assert raised.value is error
+    assert clock_values.__next__() == 8.0

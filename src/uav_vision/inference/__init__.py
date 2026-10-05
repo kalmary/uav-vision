@@ -7,7 +7,8 @@ from .base import (
     InferenceRunError,
     Segmenter,
 )
-from .ultralytics import UltralyticsDetector
+from .ultralytics import UltralyticsDetector, UltralyticsSegmenter
+from .ultralytics_depth import UltralyticsDepthEstimator
 
 __all__ = (
     "Detector",
@@ -18,4 +19,6 @@ __all__ = (
     "InferenceRunError",
     "Segmenter",
     "UltralyticsDetector",
+    "UltralyticsDepthEstimator",
+    "UltralyticsSegmenter",
 )

@@ -1,0 +1,52 @@
+detection:
+  nano:
+    identifier: models/yolo26n.pt
+    input_size: 640
+  small:
+    identifier: models/yolo26s.pt
+    input_size: 640
+  medium:
+    identifier: models/yolo26m.pt
+    input_size: 640
+  large:
+    identifier: models/yolo26l.pt
+    input_size: 640
+  xlarge:
+    identifier: models/yolo26x.pt
+    input_size: 640
+segmentation:
+  nano:
+    identifier: models/yolo26n-sem.pt
+    input_size: 640
+  small:
+    identifier: models/yolo26s-sem.pt
+    input_size: 640
+  medium:
+    identifier: models/yolo26m-sem.pt
+    input_size: 640
+  large:
+    identifier: models/yolo26l-sem.pt
+    input_size: 640
+  xlarge:
+    identifier: models/yolo26x-sem.pt
+    input_size: 640
+depth:
+  nano:
+    identifier: models/yolo26n-depth.pt
+    input_size: 768
+  small:
+    identifier: models/yolo26s-depth.pt
+    input_size: 768
+  medium:
+    identifier: models/yolo26m-depth.pt
+    input_size: 768
+  large:
+    identifier: models/yolo26l-depth.pt
+    input_size: 768
+  xlarge:
+    identifier: models/yolo26x-depth.pt
+    input_size: 768
+detection_filters:
+  selected_classes: []
+  minimum_confidence: 0.0
+  top_k: null

@@ -3,11 +3,17 @@ from typing import Callable, Optional
 
 from uav_vision.capture.gstreamer import GStreamerCamera
 from uav_vision.capture.opencv import OpenCvCamera
-from uav_vision.config.settings import AppSettings, CameraType
-from uav_vision.inference.ultralytics import UltralyticsDetector
+from uav_vision.config.settings import AppSettings, CameraType, ProcessingType
+from uav_vision.inference.ultralytics import (
+    UltralyticsDetector,
+    UltralyticsSegmenter,
+)
+from uav_vision.inference.ultralytics_depth import UltralyticsDepthEstimator
 from uav_vision.output.log import LogOutput, attach_secondary_failure
 from uav_vision.pipeline import run_pipeline
+from uav_vision.processing.depth import DepthProcessor
 from uav_vision.processing.detection import DetectionProcessor
+from uav_vision.processing.segmentation import SegmentationProcessor
 
 
 def _diagnose_failure(
@@ -25,17 +31,12 @@ def run(
     settings: AppSettings,
     should_stop: Optional[Callable[[], bool]] = None,
 ) -> None:
+    processing_type = settings.processing.processing_type
     model = settings.model
     with ExitStack() as resources:
         log_output = LogOutput(settings.logging)
         resources.enter_context(log_output)
         log_output.startup(settings)
-
-        if settings.processing.processing_type.value != "detection":
-            message = "processing type '{}' is unavailable: ".format(
-                settings.processing.processing_type.value
-            )
-            raise RuntimeError(message + "no model or processor is configured")
 
         try:
             if settings.capture.camera_type is CameraType.OPENCV:
@@ -55,11 +56,24 @@ def run(
         )
 
         try:
-            detector = UltralyticsDetector(
-                settings.inference,
-                model.identifier,
-                model.input_size,
-            )
+            if processing_type is ProcessingType.DETECTION:
+                provider = UltralyticsDetector(
+                    settings.inference,
+                    model.identifier,
+                    model.input_size,
+                )
+            elif processing_type is ProcessingType.SEGMENTATION:
+                provider = UltralyticsSegmenter(
+                    settings.inference,
+                    model.identifier,
+                    model.input_size,
+                )
+            else:
+                provider = UltralyticsDepthEstimator(
+                    settings.inference,
+                    model.identifier,
+                    model.input_size,
+                )
         except BaseException as error:
             _diagnose_failure(log_output, "inference", error)
             raise
@@ -72,18 +86,27 @@ def run(
         )
 
         try:
-            filters = (
-                settings.yolo.detection_filters if settings.yolo is not None else None
-            )
-            processor = (
-                DetectionProcessor(detector)
-                if filters is None
-                else DetectionProcessor(detector, filters)
-            )
+            if processing_type is ProcessingType.DETECTION:
+                filters = (
+                    settings.yolo.detection_filters
+                    if settings.yolo is not None
+                    else None
+                )
+                processor = (
+                    DetectionProcessor(provider)
+                    if filters is None
+                    else DetectionProcessor(provider, filters)
+                )
+            elif processing_type is ProcessingType.SEGMENTATION:
+                processor = SegmentationProcessor(provider)
+            else:
+                processor = DepthProcessor(provider)
         except BaseException as error:
             _diagnose_failure(log_output, "processing", error)
             raise
-        log_output.diagnostic("processing", "initialized type=detection")
+        log_output.diagnostic(
+            "processing", "initialized type={}".format(processing_type.value)
+        )
         outputs = [log_output]
 
         if settings.display.enabled:

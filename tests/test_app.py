@@ -16,6 +16,7 @@ from uav_vision.config.settings import (
     DisplaySettings,
     LogSettings,
     ModelSettings,
+    ProcessingSettings,
     ProcessingType,
     YoloSettings,
 )
@@ -38,7 +39,13 @@ def test_importing_app_does_not_import_display_module():
     assert result.returncode == 0, result.stderr
 
 
-def test_run_rejects_unresolved_settings_before_constructing_the_logger(monkeypatch):
+@pytest.mark.parametrize(
+    "processing_type",
+    (ProcessingType.DETECTION, ProcessingType.SEGMENTATION, ProcessingType.DEPTH),
+)
+def test_run_rejects_unresolved_supported_settings_before_constructing_the_logger(
+    monkeypatch, processing_type
+):
     import uav_vision.app as app
 
     monkeypatch.setattr(
@@ -46,9 +53,10 @@ def test_run_rejects_unresolved_settings_before_constructing_the_logger(monkeypa
         "LogOutput",
         lambda value: pytest.fail("logger was constructed for unresolved settings"),
     )
+    configured = AppSettings(processing=ProcessingSettings(processing_type))
 
     with pytest.raises(ValueError, match="YOLO configuration"):
-        app.run(AppSettings())
+        app.run(configured)
 
 
 class Resource:
@@ -88,6 +96,14 @@ def settings(camera_type=CameraType.OPENCV, display=DisplaySettings()):
     return replace(
         load_settings(),
         capture=CaptureSettings(camera_type, source),
+        display=display,
+    )
+
+
+def segmentation_settings(display=DisplaySettings()):
+    return replace(
+        load_settings(overrides={"processing": {"processing_type": "segmentation"}}),
+        capture=CaptureSettings(source=2),
         display=display,
     )
 
@@ -251,6 +267,269 @@ def test_run_passes_yolo_detection_filters_to_the_processor(monkeypatch):
     app.run(configured)
 
     assert filters in events
+
+
+def test_run_composes_segmentation_for_a_headless_pipeline(monkeypatch):
+    import uav_vision.app as app
+
+    events = []
+    source = Resource("source", events)
+    log_output = LogResource("logger", events)
+    segmenter = object()
+    processor = object()
+    configured = segmentation_settings()
+
+    monkeypatch.setattr(app, "OpenCvCamera", lambda value: source)
+    monkeypatch.setattr(app, "LogOutput", lambda value: log_output)
+    monkeypatch.setattr(
+        app,
+        "UltralyticsSegmenter",
+        lambda *values: events.append(("segmenter", values)) or segmenter,
+    )
+    monkeypatch.setattr(
+        app,
+        "SegmentationProcessor",
+        lambda value: events.append(("processor", value)) or processor,
+    )
+    monkeypatch.setattr(
+        app,
+        "run_pipeline",
+        lambda source_value, processor_value, outputs, should_stop, fps: events.append(
+            ("pipeline", source_value, processor_value, outputs, should_stop, fps)
+        ),
+    )
+
+    app.run(configured)
+
+    assert events == [
+        ("startup", configured),
+        ("diagnostic", "capture", "initialized camera=opencv source=2", None),
+        (
+            "segmenter",
+            (configured.inference, "models/yolo26n-sem.pt", 640),
+        ),
+        (
+            "diagnostic",
+            "inference",
+            "initialized provider=ultralytics model=models/yolo26n-sem.pt device=cpu",
+            None,
+        ),
+        ("processor", segmenter),
+        ("diagnostic", "processing", "initialized type=segmentation", None),
+        ("pipeline", source, processor, [log_output], None, 30),
+        "close source",
+        "close logger",
+    ]
+
+
+def test_run_composes_segmentation_with_logger_then_display_outputs(monkeypatch):
+    import uav_vision.app as app
+
+    events = []
+    source = Resource("source", events)
+    log_output = LogResource("logger", events)
+    display_output = Resource("display", events)
+    segmenter = object()
+    processor = object()
+    configured = segmentation_settings(DisplaySettings(960, 540, True))
+
+    monkeypatch.setattr(app, "OpenCvCamera", lambda value: source)
+    monkeypatch.setattr(app, "LogOutput", lambda value: log_output)
+    monkeypatch.setattr(
+        app,
+        "UltralyticsSegmenter",
+        lambda *values: events.append(("segmenter", values)) or segmenter,
+    )
+    monkeypatch.setattr(
+        app,
+        "SegmentationProcessor",
+        lambda value: events.append(("processor", value)) or processor,
+    )
+    monkeypatch.setattr(
+        "uav_vision.output.display.DisplayOutput",
+        lambda value: events.append(("display", value)) or display_output,
+    )
+    monkeypatch.setattr(
+        app,
+        "run_pipeline",
+        lambda source_value, processor_value, outputs, should_stop, fps: events.append(
+            ("pipeline", source_value, processor_value, outputs)
+        ),
+    )
+
+    app.run(configured)
+
+    assert events == [
+        ("startup", configured),
+        ("diagnostic", "capture", "initialized camera=opencv source=2", None),
+        (
+            "segmenter",
+            (configured.inference, "models/yolo26n-sem.pt", 640),
+        ),
+        (
+            "diagnostic",
+            "inference",
+            "initialized provider=ultralytics model=models/yolo26n-sem.pt device=cpu",
+            None,
+        ),
+        ("processor", segmenter),
+        ("diagnostic", "processing", "initialized type=segmentation", None),
+        ("display", configured.display),
+        ("diagnostic", "display", "initialized dimensions=960x540", None),
+        ("pipeline", source, processor, [log_output, display_output]),
+        "close display",
+        "close source",
+        "close logger",
+    ]
+
+
+def test_run_closes_resources_when_segmenter_initialization_fails(monkeypatch):
+    import uav_vision.app as app
+
+    events = []
+    source = Resource("source", events)
+    log_output = LogResource("logger", events)
+    error = RuntimeError("segmenter")
+    configured = segmentation_settings()
+    monkeypatch.setattr(app, "OpenCvCamera", lambda value: source)
+    monkeypatch.setattr(app, "LogOutput", lambda value: log_output)
+    monkeypatch.setattr(app, "UltralyticsSegmenter", lambda *values: _raise(error))
+
+    with pytest.raises(RuntimeError) as raised:
+        app.run(configured)
+
+    assert raised.value is error
+    assert events[-3:] == [
+        ("diagnostic", "inference", "initialization failed", error),
+        "close source",
+        "close logger",
+    ]
+
+
+def test_run_closes_resources_when_segmentation_processor_initialization_fails(
+    monkeypatch,
+):
+    import uav_vision.app as app
+
+    events = []
+    source = Resource("source", events)
+    log_output = LogResource("logger", events)
+    error = RuntimeError("processor")
+    configured = segmentation_settings()
+    monkeypatch.setattr(app, "OpenCvCamera", lambda value: source)
+    monkeypatch.setattr(app, "LogOutput", lambda value: log_output)
+    monkeypatch.setattr(app, "UltralyticsSegmenter", lambda *values: object())
+    monkeypatch.setattr(app, "SegmentationProcessor", lambda value: _raise(error))
+
+    with pytest.raises(RuntimeError) as raised:
+        app.run(configured)
+
+    assert raised.value is error
+    assert events[-3:] == [
+        ("diagnostic", "processing", "initialization failed", error),
+        "close source",
+        "close logger",
+    ]
+
+
+@pytest.mark.parametrize("display_enabled", (False, True))
+def test_run_composes_depth_and_releases_outputs_in_reverse_order(
+    monkeypatch, display_enabled
+):
+    import uav_vision.app as app
+
+    events = []
+    source = Resource("source", events)
+    logger = LogResource("logger", events)
+    display = Resource("display", events)
+    estimator = object()
+    processor = object()
+    configured = replace(
+        load_settings(),
+        processing=ProcessingSettings(ProcessingType.DEPTH),
+        yolo=YoloSettings(
+            None,
+            "test",
+            {
+                ProcessingType.DEPTH: {
+                    ModelSize.NANO: ModelSettings("models/yolo26n-depth.pt", 768)
+                }
+            },
+        ),
+        display=DisplaySettings(960, 540, display_enabled),
+    )
+    monkeypatch.setattr(app, "LogOutput", lambda value: logger)
+    monkeypatch.setattr(app, "OpenCvCamera", lambda value: source)
+    monkeypatch.setattr(
+        app,
+        "UltralyticsDepthEstimator",
+        lambda *values: events.append(("estimator", values)) or estimator,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        app,
+        "DepthProcessor",
+        lambda value: events.append(("processor", value)) or processor,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "uav_vision.output.display.DisplayOutput", lambda value: display
+    )
+    monkeypatch.setattr(
+        app,
+        "run_pipeline",
+        lambda source_value, processor_value, outputs, stop, fps: events.append(
+            ("pipeline", source_value, processor_value, outputs, fps)
+        ),
+    )
+
+    app.run(configured)
+
+    assert (
+        "estimator",
+        (configured.inference, "models/yolo26n-depth.pt", 768),
+    ) in events
+    assert ("processor", estimator) in events
+    outputs = [logger, display] if display_enabled else [logger]
+    assert ("pipeline", source, processor, outputs, 30) in events
+    assert events[-3 if display_enabled else -2 :] == (
+        ["close display", "close source", "close logger"]
+        if display_enabled
+        else ["close source", "close logger"]
+    )
+
+
+def test_run_closes_camera_when_depth_model_initialization_fails(monkeypatch):
+    import uav_vision.app as app
+
+    events = []
+    configured = replace(
+        load_settings(),
+        processing=ProcessingSettings(ProcessingType.DEPTH),
+        yolo=YoloSettings(
+            None,
+            "test",
+            {
+                ProcessingType.DEPTH: {
+                    ModelSize.NANO: ModelSettings("models/yolo26n-depth.pt", 768)
+                }
+            },
+        ),
+    )
+    failure = RuntimeError("depth initialization")
+    monkeypatch.setattr(app, "LogOutput", lambda value: LogResource("logger", events))
+    monkeypatch.setattr(app, "OpenCvCamera", lambda value: Resource("source", events))
+    monkeypatch.setattr(
+        app, "UltralyticsDepthEstimator", lambda *args: _raise(failure), raising=False
+    )
+    with pytest.raises(RuntimeError) as raised:
+        app.run(configured)
+    assert raised.value is failure
+    assert events[-3:] == [
+        ("diagnostic", "inference", "initialization failed", failure),
+        "close source",
+        "close logger",
+    ]
 
 
 def test_headless_run_does_not_construct_display_when_cv2_is_unavailable(monkeypatch):

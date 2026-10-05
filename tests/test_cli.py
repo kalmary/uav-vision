@@ -36,7 +36,7 @@ def test_cli_loads_packaged_defaults_and_reports_resolved_startup_values():
         "display.enabled=false "
         "display.width=1280 display.height=720 logging.level=basic "
         "logging.destination=console "
-        "yolo.origin=package:uav_vision.config.defaults/yolo.json\n"
+        "yolo.origin=package:uav_vision.config.defaults/yolo.yaml\n"
     )
 
 
@@ -67,7 +67,7 @@ def test_cli_uses_only_explicit_arguments_as_configuration_overrides(tmp_path):
     assert settings.fps == 24
 
 
-def test_cli_groups_detection_options_and_rejects_unavailable_mode(capsys):
+def test_cli_groups_detection_options(capsys):
     with pytest.raises(SystemExit):
         parse_args(["--help"])
 
@@ -83,11 +83,6 @@ def test_cli_groups_detection_options_and_rejects_unavailable_mode(capsys):
         assert heading in help_text
     assert "--selected-classes" in help_text
     assert "--display-width" in help_text
-
-    with pytest.raises(SystemExit):
-        parse_args(["--processing-type", "segmentation"])
-
-    assert "no model or processor is configured" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -265,19 +260,28 @@ def test_mode_help_uses_the_processing_type_from_selected_configuration(
     assert "--selected-classes" not in help_text
 
 
-def test_loader_rejects_an_unconfigured_processing_model_combination():
-    with pytest.raises(ValueError, match="does not support"):
-        load_settings(overrides={"processing": {"processing_type": "segmentation"}})
+def test_loader_resolves_the_default_depth_model():
+    configured = load_settings(overrides={"processing": {"processing_type": "depth"}})
+    assert configured.model.identifier == "models/yolo26n-depth.pt"
+    assert configured.model.input_size == 768
 
 
-@pytest.mark.parametrize("processing_type", ("segmentation", "depth"))
-def test_cli_rejects_execution_of_unimplemented_processing_modes(
-    processing_type, capsys
-):
-    with pytest.raises(SystemExit):
-        parse_args(["--processing-type", processing_type])
+def test_cli_accepts_depth_and_resolves_its_selected_model():
+    configured = parse_args(["--processing-type", "depth", "--model-size", "small"])
+    assert configured.processing.processing_type is ProcessingType.DEPTH
+    assert configured.model.identifier == "models/yolo26s-depth.pt"
+    assert configured.model.input_size == 768
 
-    assert "no model or processor is configured" in capsys.readouterr().err
+
+def test_cli_accepts_segmentation_and_resolves_its_selected_model():
+    settings = parse_args(
+        ["--processing-type", "segmentation", "--model-size", "small"]
+    )
+
+    assert settings.processing.processing_type is ProcessingType.SEGMENTATION
+    assert settings.inference.model_size is ModelSize.SMALL
+    assert settings.model.identifier == "models/yolo26s-sem.pt"
+    assert settings.model.input_size == 640
 
 
 def test_startup_uses_custom_configuration_and_cli_override_values(tmp_path):
@@ -310,7 +314,7 @@ def test_startup_uses_custom_configuration_and_cli_override_values(tmp_path):
         "display.enabled=true "
         "display.width=960 display.height=540 logging.level=debug "
         "logging.destination=console "
-        "yolo.origin=package:uav_vision.config.defaults/yolo.json\n"
+        "yolo.origin=package:uav_vision.config.defaults/yolo.yaml\n"
     )
 
 
@@ -322,14 +326,14 @@ def test_cli_reads_selected_configuration_once_and_uses_the_same_base_for_mode(
         json.dumps({"processing": {"processing_type": "segmentation"}}),
         encoding="utf-8",
     )
-    read_json = loader._read_json
+    read_yaml = loader._read_yaml
     reads = []
 
-    def counted_read_json(value):
+    def counted_read_yaml(value):
         reads.append(value)
-        return read_json(value)
+        return read_yaml(value)
 
-    monkeypatch.setattr(loader, "_read_json", counted_read_json)
+    monkeypatch.setattr(loader, "_read_yaml", counted_read_yaml)
 
     settings = parse_args(
         [

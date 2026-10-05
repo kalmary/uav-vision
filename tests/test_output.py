@@ -22,11 +22,14 @@ from uav_vision.config.settings import (
 )
 from uav_vision.domain import (
     BoundingBox,
+    DepthResult,
     Detection,
     DetectionResult,
     Frame,
     ProcessedFrame,
     ProcessingDiagnostics,
+    SegmentationClass,
+    SegmentationResult,
 )
 from uav_vision.output import FrameOutput
 from uav_vision.output.display import DisplayOutput
@@ -39,6 +42,7 @@ def resolved_settings(**values):
 
 class DisplayBackend:
     FONT_HERSHEY_SIMPLEX = 7
+    COLORMAP_VIRIDIS = 16
 
     def __init__(self, key=-1, error=None):
         self.key = key
@@ -46,6 +50,7 @@ class DisplayBackend:
         self.rectangle_calls = []
         self.text_calls = []
         self.resize_calls = []
+        self.color_map_calls = []
         self.imshow_calls = []
         self.wait_key_calls = []
         self.destroy_calls = []
@@ -56,10 +61,20 @@ class DisplayBackend:
     def putText(self, image, text, origin, font, scale, color, thickness):
         self.text_calls.append((image, text, origin, font, scale, color, thickness))
 
+    def getTextSize(self, text, font, scale, thickness):
+        width = max(1, int(round(len(text) * 8 * scale))) + thickness - 1
+        height = max(1, int(round(12 * scale))) + thickness - 1
+        baseline = max(1, int(round(3 * scale)))
+        return (width, height), baseline
+
     def resize(self, image, dimensions):
         self.resize_calls.append((image, dimensions))
         width, height = dimensions
         return np.full((height, width, 3), image[0, 0], dtype=image.dtype)
+
+    def applyColorMap(self, image, color_map):
+        self.color_map_calls.append((image.copy(), color_map))
+        return np.stack((image, image // 2, 255 - image), axis=-1)
 
     def imshow(self, window_name, image):
         self.imshow_calls.append((window_name, image))
@@ -72,6 +87,29 @@ class DisplayBackend:
 
     def destroyWindow(self, window_name):
         self.destroy_calls.append(window_name)
+
+
+class TextDisplayBackend(DisplayBackend):
+    def __init__(self):
+        super().__init__()
+        self.text_bounds = []
+
+    def putText(self, image, text, origin, font, scale, color, thickness):
+        super().putText(image, text, origin, font, scale, color, thickness)
+        (width, height), baseline = self.getTextSize(text, font, scale, thickness)
+        left, bottom = origin
+        bounds = (left, bottom - height, left + width, bottom + baseline)
+        self.text_bounds.append((image, text, bounds, scale, color, thickness))
+        image_height, image_width = image.shape[:2]
+        clipped_left = max(0, left)
+        clipped_top = max(0, bottom - height)
+        clipped_right = min(image_width, left + width)
+        clipped_bottom = min(image_height, bottom + baseline)
+        if clipped_left < clipped_right and clipped_top < clipped_bottom:
+            image[
+                clipped_top:clipped_bottom,
+                clipped_left:clipped_right,
+            ] = color
 
 
 def frame():
@@ -114,6 +152,44 @@ def processed_frame(detections=(), frames_per_second=None):
     )
 
 
+def segmentation_frame(
+    class_map,
+    classes,
+    frames_per_second=None,
+    diagnostics=None,
+):
+    return ProcessedFrame(
+        frame=frame(),
+        result=SegmentationResult(class_map, tuple(classes)),
+        diagnostics=diagnostics
+        or ProcessingDiagnostics(
+            None,
+            0.0,
+            None,
+            len(np.unique(class_map)),
+            len(np.unique(class_map)),
+            frames_per_second,
+        ),
+        processing_type=ProcessingType.SEGMENTATION,
+    )
+
+
+def depth_frame(depth_map, unit="metre", scale=1.0, frames_per_second=None):
+    return ProcessedFrame(
+        frame=frame(),
+        result=DepthResult(depth_map, unit, scale),
+        diagnostics=ProcessingDiagnostics(
+            0.01,
+            0.02,
+            0.03,
+            1,
+            1,
+            frames_per_second,
+        ),
+        processing_type=ProcessingType.DEPTH,
+    )
+
+
 def test_outputs_structurally_implement_frame_output():
     backend = DisplayBackend()
 
@@ -140,7 +216,7 @@ def test_log_writes_resolved_startup_configuration_and_redacts_url_credentials()
         "display.enabled=false "
         "display.width=1280 display.height=720 logging.level=basic "
         "logging.destination=console "
-        "yolo.origin=package:uav_vision.config.defaults/yolo.json\n"
+        "yolo.origin=package:uav_vision.config.defaults/yolo.yaml\n"
     )
 
     with pytest.raises(RuntimeError, match="already written"):
@@ -263,6 +339,89 @@ def test_log_basic_frame_record_reports_measured_fps():
     )
 
     assert stream.getvalue() == "frame fps=24.50 detections=[]\n"
+
+
+def test_log_basic_segmentation_record_counts_one_present_class_not_all_metadata():
+    stream = StringIO()
+    class_map = np.full((20, 30), 2, dtype=np.uint8)
+    processed = segmentation_frame(
+        class_map,
+        (SegmentationClass(2, "sky"), SegmentationClass(7, "tree")),
+    )
+
+    LogOutput(LogSettings(), stream=stream).write(processed)
+
+    assert stream.getvalue() == "frame fps=unavailable segmentation.classes=1\n"
+
+
+def test_log_basic_segmentation_record_counts_multiple_classes_and_reports_fps():
+    stream = StringIO()
+    class_map = np.full((20, 30), 2, dtype=np.uint8)
+    class_map[:, 15:] = 7
+    processed = segmentation_frame(
+        class_map,
+        (SegmentationClass(2, "sky"), SegmentationClass(7, "tree")),
+        frames_per_second=12.345,
+    )
+
+    LogOutput(LogSettings(), stream=stream).write(processed)
+
+    assert stream.getvalue() == "frame fps=12.35 segmentation.classes=2\n"
+
+
+def test_log_debug_segmentation_record_adds_common_frame_diagnostics():
+    stream = StringIO()
+    processed = segmentation_frame(
+        np.full((20, 30), 2, dtype=np.uint8),
+        (SegmentationClass(2, "sky"),),
+        diagnostics=ProcessingDiagnostics(0.01, 0.02, 0.03, 1, 1),
+    )
+
+    LogOutput(LogSettings(level=LogLevel.DEBUG), stream=stream).write(processed)
+
+    assert stream.getvalue() == (
+        "frame fps=unavailable segmentation.classes=1\n"
+        "frame captured_at=2026-09-21T12:30:00+00:00 "
+        "dimensions=30x20 raw_count=1 retained_count=1 "
+        "capture_duration=0.010000 inference_duration=0.020000 "
+        "processing_duration=0.030000\n"
+    )
+
+
+def test_log_basic_depth_record_reports_cached_statistics_units_scale_and_fps():
+    stream = StringIO()
+    depth_map = np.full((20, 30), 2.0, dtype=np.float32)
+    depth_map[:, 15:] = 4.0
+
+    LogOutput(LogSettings(), stream=stream).write(
+        depth_frame(depth_map, scale=0.001, frames_per_second=20.0)
+    )
+
+    assert stream.getvalue() == (
+        "frame fps=20.00 depth.minimum=2.000000 depth.maximum=4.000000 "
+        "depth.mean=3.000000 depth.standard_deviation=1.000000 "
+        "depth.unit=metre depth.scale=0.001\n"
+    )
+
+
+def test_log_debug_depth_record_adds_raw_range_and_common_frame_diagnostics():
+    stream = StringIO()
+    depth_map = np.full((20, 30), 2.0, dtype=np.float32)
+    depth_map[:, 15:] = 4.0
+
+    LogOutput(LogSettings(level=LogLevel.DEBUG), stream=stream).write(
+        depth_frame(depth_map)
+    )
+
+    assert stream.getvalue() == (
+        "frame fps=unavailable depth.minimum=2.000000 depth.maximum=4.000000 "
+        "depth.mean=3.000000 depth.standard_deviation=1.000000 "
+        "depth.unit=metre depth.scale=1.0\n"
+        "frame captured_at=2026-09-21T12:30:00+00:00 dimensions=30x20 "
+        "raw_count=1 retained_count=1 capture_duration=0.010000 "
+        "inference_duration=0.020000 processing_duration=0.030000 "
+        "depth.raw_minimum=2.000000 depth.raw_maximum=4.000000\n"
+    )
 
 
 def test_log_debug_diagnostic_includes_exception_traceback():
@@ -691,6 +850,303 @@ def test_display_pillarboxes_frames_for_wide_resolutions_without_distortion():
     assert np.all(displayed[:, :22] == 0)
     assert np.all(displayed[:, 22:67] == 17)
     assert np.all(displayed[:, 67:] == 0)
+
+
+def test_display_blends_deterministic_segmentation_colours_and_orders_labels():
+    backend = DisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=30, height=20), backend=backend)
+    class_map = np.full((20, 30), 2, dtype=np.uint8)
+    class_map[0, 0] = 7
+    processed = segmentation_frame(
+        class_map,
+        (SegmentationClass(7, "tree"), SegmentationClass(2, "sky")),
+        frames_per_second=24.5,
+    )
+    original_image = processed.frame.image.copy()
+    original_class_map = processed.result.class_map.copy()
+
+    should_stop = output.write(processed)
+
+    annotated = backend.resize_calls[0][0]
+    assert should_stop is False
+    assert annotated is not processed.frame.image
+    assert annotated[0, 0].tolist() == [32, 96, 66]
+    assert annotated[0, 1].tolist() == [61, 62, 110]
+    displayed = backend.imshow_calls[0][1]
+    fps_call = backend.text_calls[0]
+    assert fps_call[0] is displayed
+    assert fps_call[1] == "FPS: 24.50"
+    assert 0 < fps_call[4] <= 0.5
+    assert fps_call[-2:] == ((255, 255, 255), 1)
+    label_calls = [value for value in backend.text_calls if value[-1] == 1][1:]
+    assert [value[1] for value in label_calls] == ["2: sky", "7: tree"]
+    assert [value[-2] for value in label_calls] == [
+        (127, 131, 251),
+        (56, 216, 140),
+    ]
+    assert np.array_equal(processed.frame.image, original_image)
+    assert np.array_equal(processed.result.class_map, original_class_map)
+
+
+def test_display_letterboxes_segmentation_overlay_in_configured_dimensions():
+    backend = DisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=60, height=60), backend=backend)
+    processed = segmentation_frame(
+        np.full((20, 30), 2, dtype=np.uint8),
+        (SegmentationClass(2, "sky"),),
+    )
+
+    output.write(processed)
+
+    displayed = backend.imshow_calls[0][1]
+    assert backend.resize_calls[0][1] == (60, 40)
+    assert displayed.shape == (60, 60, 3)
+    assert np.all(displayed[:10] == 0)
+    assert np.all(displayed[10:50] == [61, 62, 110])
+    assert np.all(displayed[50:] == 0)
+
+
+def test_display_places_segmentation_labels_within_the_final_canvas():
+    backend = TextDisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=120, height=40), backend=backend)
+    class_map = np.full((20, 30), 2, dtype=np.uint8)
+    class_map[:, 15:] = 7
+    processed = segmentation_frame(
+        class_map,
+        (SegmentationClass(2, "sky"), SegmentationClass(7, "tree")),
+    )
+
+    output.write(processed)
+
+    displayed = backend.imshow_calls[0][1]
+    labels = [
+        value
+        for value in backend.text_bounds
+        if not value[1].startswith("FPS:") and value[-1] == 1
+    ]
+    label_draws = [
+        value for value in backend.text_bounds if not value[1].startswith("FPS:")
+    ]
+    assert [value[1] for value in labels] == ["2: sky", "7: tree"]
+    assert all(value[0] is displayed for value in labels)
+    assert all(
+        0 <= left < right <= displayed.shape[1]
+        and 0 <= top < bottom <= displayed.shape[0]
+        for _, _, (left, top, right, bottom), _, _, _ in label_draws
+    )
+
+
+def test_display_wraps_segmentation_labels_into_multiple_columns():
+    backend = TextDisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=180, height=45), backend=backend)
+    class_map = np.zeros((20, 30), dtype=np.uint8)
+    for class_id in range(5):
+        class_map[:, class_id * 6 : (class_id + 1) * 6] = class_id
+    processed = segmentation_frame(
+        class_map,
+        tuple(
+            SegmentationClass(class_id, "class-{0}".format(class_id))
+            for class_id in range(5)
+        ),
+    )
+
+    output.write(processed)
+
+    labels = [
+        value
+        for value in backend.text_bounds
+        if not value[1].startswith("FPS:") and value[-1] == 1
+    ]
+    left_positions = [value[2][0] for value in labels]
+    top_positions = [value[2][1] for value in labels]
+    assert [value[1] for value in labels] == [
+        "0: class-0",
+        "1: class-1",
+        "2: class-2",
+        "3: class-3",
+        "4: class-4",
+    ]
+    assert len(set(left_positions)) > 1
+    assert len(set(top_positions)) < len(top_positions)
+
+
+def test_display_reserves_final_canvas_header_between_fps_and_segmentation_labels():
+    backend = TextDisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=120, height=40), backend=backend)
+    class_map = np.full((20, 30), 2, dtype=np.uint8)
+    class_map[:, 15:] = 7
+    processed = segmentation_frame(
+        class_map,
+        (SegmentationClass(2, "sky"), SegmentationClass(7, "tree")),
+        frames_per_second=24.5,
+    )
+
+    output.write(processed)
+
+    displayed = backend.imshow_calls[0][1]
+    fps = next(
+        value
+        for value in backend.text_bounds
+        if value[1] == "FPS: 24.50" and value[-1] == 1
+    )
+    labels = [
+        value
+        for value in backend.text_bounds
+        if not value[1].startswith("FPS:") and value[-1] == 1
+    ]
+    label_draws = [
+        value for value in backend.text_bounds if not value[1].startswith("FPS:")
+    ]
+    assert fps[0] is displayed
+    assert fps[3] == 0.5
+    assert all(value[0] is displayed for value in labels)
+    fps_left, fps_top, fps_right, fps_bottom = fps[2]
+    assert all(
+        fps_right <= left or right <= fps_left or fps_bottom <= top or bottom <= fps_top
+        for _, _, (left, top, right, bottom), _, _, _ in label_draws
+    )
+
+
+def test_display_scales_long_segmentation_labels_to_their_grid_cells():
+    backend = TextDisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=160, height=40), backend=backend)
+    class_map = np.zeros((20, 30), dtype=np.uint8)
+    names = (
+        "pedestrian-crossing-and-sidewalk",
+        "multi-storey-residential-building",
+        "construction-and-maintenance-vehicle",
+        "vegetation-beside-the-flight-corridor",
+    )
+    for class_id in range(4):
+        class_map[:, class_id * 7 : (class_id + 1) * 7] = class_id
+    class_map[:, 28:] = 3
+    processed = segmentation_frame(
+        class_map,
+        tuple(
+            SegmentationClass(class_id, class_name)
+            for class_id, class_name in enumerate(names)
+        ),
+    )
+
+    output.write(processed)
+
+    displayed = backend.imshow_calls[0][1]
+    labels = [
+        value
+        for value in backend.text_bounds
+        if not value[1].startswith("FPS:") and value[-1] == 1
+    ]
+    label_draws = [
+        value for value in backend.text_bounds if not value[1].startswith("FPS:")
+    ]
+    assert [value[1] for value in labels] == [
+        "{0}: {1}".format(class_id, class_name)
+        for class_id, class_name in enumerate(names)
+    ]
+    assert all(value[3] < 0.5 for value in labels)
+    assert all(
+        0 <= left < right <= displayed.shape[1]
+        and 0 <= top < bottom <= displayed.shape[0]
+        for _, _, (left, top, right, bottom), _, _, _ in label_draws
+    )
+    for index, first in enumerate(labels):
+        first_left, first_top, first_right, first_bottom = first[2]
+        for second in labels[index + 1 :]:
+            second_left, second_top, second_right, second_bottom = second[2]
+            assert (
+                first_right <= second_left
+                or second_right <= first_left
+                or first_bottom <= second_top
+                or second_bottom <= first_top
+            )
+
+
+def test_display_normalizes_extreme_depth_values_and_applies_viridis_without_mutation():
+    backend = DisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=60, height=60), backend=backend)
+    maximum = np.finfo(np.float32).max
+    depth_map = np.full((20, 30), -maximum, dtype=np.float32)
+    depth_map[:, 10:20] = 0.0
+    depth_map[:, 20:] = maximum
+    processed = depth_frame(
+        depth_map,
+        unit="inverse_metre",
+        scale=0.001,
+        frames_per_second=24.5,
+    )
+    original_image = processed.frame.image.copy()
+    original_depth_map = processed.result.depth_map.copy()
+
+    should_stop = output.write(processed)
+
+    normalized, color_map = backend.color_map_calls[0]
+    assert should_stop is False
+    assert color_map == backend.COLORMAP_VIRIDIS
+    assert normalized.dtype == np.uint8
+    assert np.all(normalized[:, :10] == 0)
+    assert np.all(normalized[:, 10:20] == 127)
+    assert np.all(normalized[:, 20:] == 255)
+    colorized = backend.resize_calls[0][0]
+    assert colorized.shape == (20, 30, 3)
+    assert colorized.dtype == np.uint8
+    assert np.all(colorized[:, :10] == [0, 0, 255])
+    assert np.all(colorized[:, 10:20] == [127, 63, 128])
+    assert np.all(colorized[:, 20:] == [255, 127, 0])
+    assert backend.resize_calls[0][1] == (60, 40)
+    displayed = backend.imshow_calls[0][1]
+    assert displayed.shape == (60, 60, 3)
+    assert np.all(displayed[:10] == 0)
+    assert np.all(displayed[10:50] == [0, 0, 255])
+    assert np.all(displayed[50:] == 0)
+    assert backend.text_calls[0][0] is displayed
+    assert backend.text_calls[0][1] == "FPS: 24.50"
+    assert np.array_equal(processed.frame.image, original_image)
+    assert np.array_equal(processed.result.depth_map, original_depth_map)
+
+
+def test_display_normalizes_the_smallest_positive_depth_span_without_overflow():
+    backend = DisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=30, height=20), backend=backend)
+    smallest = np.nextafter(np.float64(0.0), np.float64(1.0))
+    depth_map = np.zeros((20, 30), dtype=np.float64)
+    depth_map[:, 15:] = smallest
+    processed = depth_frame(depth_map)
+    original_depth_map = processed.result.depth_map.copy()
+
+    with np.errstate(all="raise"):
+        output.write(processed)
+
+    normalized, _ = backend.color_map_calls[0]
+    assert np.all(normalized[:, :15] == 0)
+    assert np.all(normalized[:, 15:] == 255)
+    assert np.array_equal(processed.result.depth_map, original_depth_map)
+
+
+def test_display_normalizes_a_constant_depth_map_to_zero():
+    backend = DisplayBackend()
+    output = DisplayOutput(DisplaySettings(width=30, height=20), backend=backend)
+
+    output.write(depth_frame(np.full((20, 30), 7.0, dtype=np.float32)))
+
+    normalized, color_map = backend.color_map_calls[0]
+    assert color_map == backend.COLORMAP_VIRIDIS
+    assert np.array_equal(normalized, np.zeros((20, 30), dtype=np.uint8))
+
+
+def test_display_depth_requests_shutdown_for_quit_key():
+    output = DisplayOutput(DisplaySettings(), backend=DisplayBackend(key=ord("q")))
+
+    assert output.write(depth_frame(np.full((20, 30), 1.0, dtype=np.float32))) is True
+
+
+def test_display_segmentation_requests_shutdown_for_quit_key():
+    output = DisplayOutput(DisplaySettings(), backend=DisplayBackend(key=ord("q")))
+    processed = segmentation_frame(
+        np.full((20, 30), 2, dtype=np.uint8),
+        (SegmentationClass(2, "sky"),),
+    )
+
+    assert output.write(processed) is True
 
 
 @pytest.mark.parametrize("key", [ord("q"), ord("Q"), 27])

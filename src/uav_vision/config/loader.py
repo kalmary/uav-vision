@@ -1,8 +1,9 @@
-import json
 from dataclasses import replace
 from importlib import resources
 from pathlib import Path
 from typing import Any, Mapping, Optional
+
+import yaml
 
 from uav_vision.config.models import ModelSize
 from uav_vision.config.settings import (
@@ -31,24 +32,24 @@ def cuda_available() -> bool:
     return bool(torch.cuda.is_available())
 
 
-def _parse_json(text: str, origin: str) -> Mapping[str, Any]:
+def _parse_yaml(text: str, origin: str) -> Mapping[str, Any]:
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError as error:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as error:
         raise ValueError(
-            "Invalid JSON in configuration file: {}".format(origin)
+            "Invalid YAML in configuration file: {}".format(origin)
         ) from error
     if not isinstance(data, dict):
         raise ValueError(
-            "Configuration file must contain a JSON object: {}".format(origin)
+            "Configuration file must contain a YAML mapping: {}".format(origin)
         )
     return data
 
 
-def _read_json(path: Path) -> Mapping[str, Any]:
+def _read_yaml(path: Path) -> Mapping[str, Any]:
     try:
         with path.open(encoding="utf-8") as stream:
-            return _parse_json(stream.read(), str(path))
+            return _parse_yaml(stream.read(), str(path))
     except FileNotFoundError as error:
         raise ValueError(
             "Configuration file does not exist: {}".format(path)
@@ -72,7 +73,7 @@ def _packaged_resource_name(value: Any) -> str:
     return value
 
 
-def _read_packaged_json(name: str) -> Mapping[str, Any]:
+def _read_packaged_yaml(name: str) -> Mapping[str, Any]:
     origin = _packaged_origin(name)
     try:
         text = resources.read_text(_DEFAULTS_PACKAGE, name)
@@ -80,12 +81,14 @@ def _read_packaged_json(name: str) -> Mapping[str, Any]:
         raise ValueError(
             "Configuration file does not exist: {}".format(origin)
         ) from error
-    return _parse_json(text, origin)
+    return _parse_yaml(text, origin)
 
 
 def _merge(
     defaults: Mapping[str, Any], values: Mapping[str, Any], context: str
 ) -> dict:
+    if any(not isinstance(key, str) for key in values):
+        raise ValueError("Configuration keys in {} must be strings".format(context))
     unknown = set(values) - set(defaults)
     if unknown:
         raise ValueError(
@@ -368,15 +371,15 @@ def load_settings(
     validate_model: bool = True,
     check_cuda: bool = True,
 ) -> AppSettings:
-    app_defaults = _read_packaged_json("app.json")
+    app_defaults = _read_packaged_yaml("app.yaml")
     yolo_resource = _packaged_resource_name(app_defaults.get("yolo_config_path"))
-    yolo_defaults = _read_packaged_json(yolo_resource)
+    yolo_defaults = _read_packaged_yaml(yolo_resource)
     default_yolo = _yolo_settings(None, _packaged_origin(yolo_resource), yolo_defaults)
     _validate_app_layer(app_defaults, {}, "packaged defaults", default_yolo)
 
     selected_path = None if config_path is None else Path(config_path)
     if selected_path is not None:
-        user_values = _read_json(selected_path)
+        user_values = _read_yaml(selected_path)
         _validate_app_layer(
             app_defaults, user_values, "user configuration", default_yolo
         )
@@ -408,7 +411,7 @@ def load_settings(
         yolo_values = dict(yolo_defaults)
         yolo = default_yolo
     else:
-        yolo_values = _merge(yolo_defaults, _read_json(yolo_path), str(yolo_path))
+        yolo_values = _merge(yolo_defaults, _read_yaml(yolo_path), str(yolo_path))
         yolo = _yolo_settings(yolo_path, str(yolo_path), yolo_values)
 
     if yolo_overrides is not None:

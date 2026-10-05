@@ -5,11 +5,11 @@ The Rust implementation was removed. The project is planned as a modular Python 
 | Workplan step | Status |
 | --- | --- |
 | 1. Python Foundation, Domain Types, and Configuration | Complete |
-| 2. Replaceable Camera Capture | Implemented; hardware smoke test pending |
+| 2. Replaceable Camera Capture | Implemented; laptop camera smoke test passed |
 | 3. Replaceable YOLO Inference and Processing Mode | Complete |
-| 4. Headless Pipeline, Outputs, and Entry Points | Implemented; live camera/display smoke tests pending |
+| 4. Headless Pipeline, Outputs, and Entry Points | Implemented; laptop headless/display smoke tests passed |
 | 5. Jetson Nano Deployment and Validation | Prepared locally; Jetson hardware validation pending |
-| 6. Configuration, Processing Modes, and Mandatory Logging | 6a–6f complete; 6g–6i pending |
+| 6. Configuration, Processing Modes, and Mandatory Logging | 6a–6i implemented locally; Jetson validation deferred |
 
 ## Current decisions
 
@@ -19,18 +19,10 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Laptop and USB cameras receive a dedicated entry point backed by the shared pipeline.
 - Jetson acceleration uses an Ultralytics-compatible TensorRT engine validated on the target device.
 - Ultralytics, NumPy, and platform-appropriate OpenCV builds are the initial runtime packages; pytest, pytest-cov, Ruff, setuptools, wheel, and uv support development.
-- Headless capture and inference remain independent from optional display behavior; mandatory basic/debug logging is implemented, with mode-specific result formatting pending.
+- Headless capture and inference remain independent from optional display behavior; mandatory basic/debug logging covers detection, semantic segmentation, and depth statistics.
 
 ## Work Log
 
-- Reset the implementation language — removed the Rust source, tests, Cargo metadata, and generated build artifacts, then replanned the application as modular Python with separate Jetson and USB-camera adapters.
-- Refresh ignored files — replaced the obsolete Rust target rule with macOS, Zed, Python, virtual-environment, build, test-cache, coverage, and local-environment patterns.
-- Fix the Python source boundary — made `src/uav_vision/` the required location for every application module and entry point.
-- Select initial Python packages — documented maintained dependencies, mutually exclusive OpenCV variants, and preservation of JetPack-provided GPU libraries in the work plan.
-- Implement Python Step 1 — added the package foundation, validated domain and configuration types, CLI parsing, mutually exclusive runtime profiles, dependency groups, and passing tests and Ruff checks.
-- Clarify runtime dependencies — documented why each installation must select exactly one desktop, generic-headless, or Jetson platform profile.
-- Clarify Python support — kept Python 3.8 as the JetPack 4 compatibility floor while confirming Python 3.12 as the desktop development runtime.
-- Explain deployment profiles — documented the planned laptop installation and dependency-preserving JetPack 4 container workflow.
 - Preserve optional Jetson display — confirmed the shared `--display` configuration and documented use of JetPack-provided GUI OpenCV without the desktop extra.
 - Summarize implementation status — confirmed that Step 1 is complete and camera, inference, pipeline, display implementation, and Jetson validation remain pending.
 - Scope the next implementation step — reviewed all Markdown and code, defined the Step 2 capture contract, and requested approval before coding.
@@ -73,3 +65,11 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Close Step 6 audit gaps — fixed credential redaction and startup completeness, made capped waits responsive, unified model identifier and input size, enforced frame-aligned detections, and synchronized deployment documentation.
 - Preserve display aspect ratio — made optional display output uniformly fit frames within the configured resolution using black padding while leaving headless frames unchanged.
 - Review remaining work — confirmed segmentation, depth, final integration documentation, hardware validation, and Git reconciliation are still outstanding.
+- Implement Step 6g — added YOLO26 semantic segmentation models, provider conversion, processing, mode composition, unique-class logging, deterministic display overlays, and real-model verification.
+- Implement Step 6h — added source-aligned metric depth inference, immutable maps and cached statistics, CLI and pipeline composition, logging, range-safe Viridis display, and tests with a real nano-model CPU smoke check; Jetson validation remains pending.
+- Implement local Step 6i — refreshed runtime documentation, corrected logging choices in CLI help, strengthened entry-point and packaged-default tests, and verified all three modes with the real laptop camera headlessly and with display; Jetson work remains deferred.
+- Separate installation from execution — kept dependency profiles and the test group in installation commands and documented plain `uv run` commands, with a Python 3.12 pin for stable local execution.
+- Preserve existing entry points — retained both installed console aliases without adding direct-script wrappers or repeating extras in run examples.
+- Clarify default configuration ownership — documented the existing packaged application and YOLO files as the source of runtime defaults, with custom files optional and CLI values acting only as explicit overrides.
+- Switch configuration to YAML — replaced packaged JSON defaults with `app.yaml` and `yolo.yaml`, recorded PyYAML as a runtime dependency, retained precedence and validation, updated examples, and verified safe parsing plus isolated wheel installation.
+- Verify CLI retention — confirmed all CLI options remain available and explicit arguments override YAML defaults while omitted arguments retain configuration values; all CLI tests passed.
