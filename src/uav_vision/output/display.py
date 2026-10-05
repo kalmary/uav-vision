@@ -10,13 +10,7 @@ from uav_vision.domain import (
     SegmentationResult,
 )
 
-
-def _segmentation_color(class_id: int) -> Tuple[int, int, int]:
-    return (
-        (37 * class_id + 53) % 256,
-        (17 * class_id + 97) % 256,
-        (29 * class_id + 193) % 256,
-    )
+from .colors import segmentation_color
 
 
 def _fit_text(
@@ -38,13 +32,13 @@ def _fit_text(
     return scale, height, baseline
 
 
-def _draw_fps(backend: Any, image: np.ndarray, text: str) -> int:
+def _draw_fps(backend: Any, image: np.ndarray, text: str) -> None:
     image_height, image_width = image.shape[:2]
     padding = max(
         0,
         min(4, (image_width - 1) // 2, (image_height - 1) // 2),
     )
-    scale, text_height, baseline = _fit_text(
+    scale, text_height, _ = _fit_text(
         backend,
         text,
         backend.FONT_HERSHEY_SIMPLEX,
@@ -61,62 +55,6 @@ def _draw_fps(backend: Any, image: np.ndarray, text: str) -> int:
         (255, 255, 255),
         1,
     )
-    return min(image_height, text_height + baseline + 2 * padding)
-
-
-def _draw_labels(
-    backend: Any,
-    image: np.ndarray,
-    classes: Tuple[Tuple[int, str], ...],
-    top_offset: int = 0,
-) -> None:
-    image_height, image_width = image.shape[:2]
-    available_height = image_height - top_offset
-    if not classes or available_height <= 0:
-        return
-
-    rows = min(len(classes), max(1, available_height // 20))
-    columns = (len(classes) + rows - 1) // rows
-    for index, (class_id, class_name) in enumerate(classes):
-        column = index // rows
-        row = index % rows
-        left = column * image_width // columns
-        right = (column + 1) * image_width // columns
-        top = top_offset + row * available_height // rows
-        bottom = top_offset + (row + 1) * available_height // rows
-        cell_width = right - left
-        cell_height = bottom - top
-        padding = max(
-            0,
-            min(4, (cell_width - 1) // 2, (cell_height - 1) // 2),
-        )
-        label = "{0}: {1}".format(class_id, class_name)
-        scale, text_height, _ = _fit_text(
-            backend,
-            label,
-            backend.FONT_HERSHEY_SIMPLEX,
-            max(1, cell_width - 2 * padding),
-            max(1, cell_height - 2 * padding),
-        )
-        origin = (left + padding, top + padding + text_height)
-        backend.putText(
-            image,
-            label,
-            origin,
-            backend.FONT_HERSHEY_SIMPLEX,
-            scale,
-            (0, 0, 0),
-            3,
-        )
-        backend.putText(
-            image,
-            label,
-            origin,
-            backend.FONT_HERSHEY_SIMPLEX,
-            scale,
-            _segmentation_color(class_id),
-            1,
-        )
 
 
 class DisplayOutput:
@@ -144,19 +82,11 @@ class DisplayOutput:
             raise RuntimeError("Display output is closed")
 
         annotated = processed.frame.image.copy()
-        present_classes = ()
         if isinstance(processed.result, SegmentationResult):
-            class_names = {
-                value.class_id: value.class_name for value in processed.result.classes
-            }
-            present_classes = tuple(
-                (int(class_id), class_names[int(class_id)])
-                for class_id in np.unique(processed.result.class_map)
-            )
             overlay = np.empty_like(annotated)
-            for class_id, _ in present_classes:
-                overlay[processed.result.class_map == class_id] = _segmentation_color(
-                    class_id
+            for class_id in np.unique(processed.result.class_map):
+                overlay[processed.result.class_map == class_id] = segmentation_color(
+                    int(class_id)
                 )
             annotated = (
                 (annotated.astype(np.uint16) * 3 + overlay.astype(np.uint16) * 2) // 5
@@ -234,14 +164,7 @@ class DisplayOutput:
         top = (self._settings.height - height) // 2
         displayed[top : top + height, left : left + width] = resized
         if isinstance(processed.result, (SegmentationResult, DepthResult)):
-            header_height = _draw_fps(self._backend, displayed, "FPS: " + fps)
-            if isinstance(processed.result, SegmentationResult):
-                _draw_labels(
-                    self._backend,
-                    displayed,
-                    present_classes,
-                    top_offset=header_height,
-                )
+            _draw_fps(self._backend, displayed, "FPS: " + fps)
         self._opened = True
         self._backend.imshow(self._window_name, displayed)
         key = self._backend.waitKey(1)

@@ -352,7 +352,10 @@ def test_log_basic_segmentation_record_counts_one_present_class_not_all_metadata
 
     LogOutput(LogSettings(), stream=stream).write(processed)
 
-    assert stream.getvalue() == "frame fps=unavailable segmentation.classes=1\n"
+    assert stream.getvalue() == (
+        "frame fps=unavailable segmentation.classes=1 "
+        "segmentation.labels=[2: sky color=pink]\n"
+    )
 
 
 def test_log_basic_segmentation_record_counts_multiple_classes_and_reports_fps():
@@ -361,13 +364,16 @@ def test_log_basic_segmentation_record_counts_multiple_classes_and_reports_fps()
     class_map[:, 15:] = 7
     processed = segmentation_frame(
         class_map,
-        (SegmentationClass(2, "sky"), SegmentationClass(7, "tree")),
+        (SegmentationClass(7, "tree"), SegmentationClass(2, "sky")),
         frames_per_second=12.345,
     )
 
     LogOutput(LogSettings(), stream=stream).write(processed)
 
-    assert stream.getvalue() == "frame fps=12.35 segmentation.classes=2\n"
+    assert stream.getvalue() == (
+        "frame fps=12.35 segmentation.classes=2 "
+        "segmentation.labels=[2: sky color=pink, 7: tree color=yellow]\n"
+    )
 
 
 def test_log_debug_segmentation_record_adds_common_frame_diagnostics():
@@ -381,7 +387,8 @@ def test_log_debug_segmentation_record_adds_common_frame_diagnostics():
     LogOutput(LogSettings(level=LogLevel.DEBUG), stream=stream).write(processed)
 
     assert stream.getvalue() == (
-        "frame fps=unavailable segmentation.classes=1\n"
+        "frame fps=unavailable segmentation.classes=1 "
+        "segmentation.labels=[2: sky color=pink]\n"
         "frame captured_at=2026-09-21T12:30:00+00:00 "
         "dimensions=30x20 raw_count=1 retained_count=1 "
         "capture_duration=0.010000 inference_duration=0.020000 "
@@ -853,7 +860,7 @@ def test_display_pillarboxes_frames_for_wide_resolutions_without_distortion():
     assert np.all(displayed[:, 67:] == 0)
 
 
-def test_display_blends_deterministic_segmentation_colours_and_orders_labels():
+def test_display_blends_deterministic_segmentation_colours_without_labels():
     backend = DisplayBackend()
     output = DisplayOutput(DisplaySettings(width=30, height=20), backend=backend)
     class_map = np.full((20, 30), 2, dtype=np.uint8)
@@ -879,12 +886,7 @@ def test_display_blends_deterministic_segmentation_colours_and_orders_labels():
     assert fps_call[1] == "FPS: 24.50"
     assert 0 < fps_call[4] <= 0.5
     assert fps_call[-2:] == ((255, 255, 255), 1)
-    label_calls = [value for value in backend.text_calls if value[-1] == 1][1:]
-    assert [value[1] for value in label_calls] == ["2: sky", "7: tree"]
-    assert [value[-2] for value in label_calls] == [
-        (127, 131, 251),
-        (56, 216, 140),
-    ]
+    assert [value[1] for value in backend.text_calls] == ["FPS: 24.50"]
     assert np.array_equal(processed.frame.image, original_image)
     assert np.array_equal(processed.result.class_map, original_class_map)
 
@@ -907,110 +909,10 @@ def test_display_letterboxes_segmentation_overlay_in_configured_dimensions():
     assert np.all(displayed[50:] == 0)
 
 
-def test_display_places_segmentation_labels_within_the_final_canvas():
+@pytest.mark.parametrize("width,height", [(120, 40), (180, 45), (160, 40), (1, 1)])
+def test_display_segmentation_draws_only_fps_for_many_long_class_names(width, height):
     backend = TextDisplayBackend()
-    output = DisplayOutput(DisplaySettings(width=120, height=40), backend=backend)
-    class_map = np.full((20, 30), 2, dtype=np.uint8)
-    class_map[:, 15:] = 7
-    processed = segmentation_frame(
-        class_map,
-        (SegmentationClass(2, "sky"), SegmentationClass(7, "tree")),
-    )
-
-    output.write(processed)
-
-    displayed = backend.imshow_calls[0][1]
-    labels = [
-        value
-        for value in backend.text_bounds
-        if not value[1].startswith("FPS:") and value[-1] == 1
-    ]
-    label_draws = [
-        value for value in backend.text_bounds if not value[1].startswith("FPS:")
-    ]
-    assert [value[1] for value in labels] == ["2: sky", "7: tree"]
-    assert all(value[0] is displayed for value in labels)
-    assert all(
-        0 <= left < right <= displayed.shape[1]
-        and 0 <= top < bottom <= displayed.shape[0]
-        for _, _, (left, top, right, bottom), _, _, _ in label_draws
-    )
-
-
-def test_display_wraps_segmentation_labels_into_multiple_columns():
-    backend = TextDisplayBackend()
-    output = DisplayOutput(DisplaySettings(width=180, height=45), backend=backend)
-    class_map = np.zeros((20, 30), dtype=np.uint8)
-    for class_id in range(5):
-        class_map[:, class_id * 6 : (class_id + 1) * 6] = class_id
-    processed = segmentation_frame(
-        class_map,
-        tuple(
-            SegmentationClass(class_id, "class-{0}".format(class_id))
-            for class_id in range(5)
-        ),
-    )
-
-    output.write(processed)
-
-    labels = [
-        value
-        for value in backend.text_bounds
-        if not value[1].startswith("FPS:") and value[-1] == 1
-    ]
-    left_positions = [value[2][0] for value in labels]
-    top_positions = [value[2][1] for value in labels]
-    assert [value[1] for value in labels] == [
-        "0: class-0",
-        "1: class-1",
-        "2: class-2",
-        "3: class-3",
-        "4: class-4",
-    ]
-    assert len(set(left_positions)) > 1
-    assert len(set(top_positions)) < len(top_positions)
-
-
-def test_display_reserves_final_canvas_header_between_fps_and_segmentation_labels():
-    backend = TextDisplayBackend()
-    output = DisplayOutput(DisplaySettings(width=120, height=40), backend=backend)
-    class_map = np.full((20, 30), 2, dtype=np.uint8)
-    class_map[:, 15:] = 7
-    processed = segmentation_frame(
-        class_map,
-        (SegmentationClass(2, "sky"), SegmentationClass(7, "tree")),
-        frames_per_second=24.5,
-    )
-
-    output.write(processed)
-
-    displayed = backend.imshow_calls[0][1]
-    fps = next(
-        value
-        for value in backend.text_bounds
-        if value[1] == "FPS: 24.50" and value[-1] == 1
-    )
-    labels = [
-        value
-        for value in backend.text_bounds
-        if not value[1].startswith("FPS:") and value[-1] == 1
-    ]
-    label_draws = [
-        value for value in backend.text_bounds if not value[1].startswith("FPS:")
-    ]
-    assert fps[0] is displayed
-    assert fps[3] == 0.5
-    assert all(value[0] is displayed for value in labels)
-    fps_left, fps_top, fps_right, fps_bottom = fps[2]
-    assert all(
-        fps_right <= left or right <= fps_left or fps_bottom <= top or bottom <= fps_top
-        for _, _, (left, top, right, bottom), _, _, _ in label_draws
-    )
-
-
-def test_display_scales_long_segmentation_labels_to_their_grid_cells():
-    backend = TextDisplayBackend()
-    output = DisplayOutput(DisplaySettings(width=160, height=40), backend=backend)
+    output = DisplayOutput(DisplaySettings(width=width, height=height), backend=backend)
     class_map = np.zeros((20, 30), dtype=np.uint8)
     names = (
         "pedestrian-crossing-and-sidewalk",
@@ -1027,39 +929,15 @@ def test_display_scales_long_segmentation_labels_to_their_grid_cells():
             SegmentationClass(class_id, class_name)
             for class_id, class_name in enumerate(names)
         ),
+        frames_per_second=24.5,
     )
 
     output.write(processed)
 
     displayed = backend.imshow_calls[0][1]
-    labels = [
-        value
-        for value in backend.text_bounds
-        if not value[1].startswith("FPS:") and value[-1] == 1
-    ]
-    label_draws = [
-        value for value in backend.text_bounds if not value[1].startswith("FPS:")
-    ]
-    assert [value[1] for value in labels] == [
-        "{0}: {1}".format(class_id, class_name)
-        for class_id, class_name in enumerate(names)
-    ]
-    assert all(value[3] < 0.5 for value in labels)
-    assert all(
-        0 <= left < right <= displayed.shape[1]
-        and 0 <= top < bottom <= displayed.shape[0]
-        for _, _, (left, top, right, bottom), _, _, _ in label_draws
-    )
-    for index, first in enumerate(labels):
-        first_left, first_top, first_right, first_bottom = first[2]
-        for second in labels[index + 1 :]:
-            second_left, second_top, second_right, second_bottom = second[2]
-            assert (
-                first_right <= second_left
-                or second_right <= first_left
-                or first_bottom <= second_top
-                or second_bottom <= first_top
-            )
+    assert displayed.shape == (height, width, 3)
+    assert [value[1] for value in backend.text_bounds] == ["FPS: 24.50"]
+    assert backend.text_bounds[0][0] is displayed
 
 
 def test_display_normalizes_extreme_depth_values_and_applies_viridis_without_mutation():

@@ -157,8 +157,13 @@ Detection filtering is applied before outputs in a fixed order: selected classes
 
 For semantic segmentation, display assigns each non-negative class identifier a
 deterministic BGR colour, blends the dense colour map over a copy of the source
-frame at 40% colour and 60% source image, and lists present class names in
-class-identifier order. The source frame and segmentation result remain unchanged.
+frame at 40% colour and 60% source image, and displays only FPS text, without
+class labels. Present class IDs, names, and basic colour names are logged in
+class-identifier order using the same palette as the display's BGR overlay.
+Colours are converted to RGB and matched by squared Euclidean distance to ten
+references: black, white, red, orange, yellow, green, blue, purple, pink, and
+brown. Equal distances use the first reference in that order.
+The source frame and segmentation result remain unchanged.
 Headless composition neither constructs `DisplayOutput` nor imports its OpenCV
 windowing resources.
 
@@ -174,7 +179,8 @@ At `basic`, the logger writes the effective launch configuration once and one fi
 
 - detection: class name, confidence, and bounding box for every retained detection, including an explicit empty result;
 - semantic segmentation: the number of unique class identifiers present in the
-  dense map, rather than the number of instances or available metadata entries;
+  dense map, rather than the number of instances or available metadata entries,
+  plus the present class IDs, names, and nearest basic colour names;
 - depth: minimum, maximum, mean, and standard deviation.
 
 Every per-frame record includes measured FPS. The first processed frame reports

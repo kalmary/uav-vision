@@ -13,6 +13,8 @@ from uav_vision.domain import (
     SegmentationResult,
 )
 
+from .colors import nearest_color_name, segmentation_color
+
 _SOURCE_CREDENTIAL = re.compile(
     r"(?i)(?P<prefix>(?:^|[?&;,\s])(?:user(?:[-_]?id|name)?|user[-_]?pw|"
     r"password|passwd|token|access[-_]?token|auth[-_]?token)\s*(?:=|:)\s*)"
@@ -209,10 +211,28 @@ class LogOutput:
                 )
             )
         elif isinstance(processed.result, SegmentationResult):
+            present_classes = np.unique(processed.result.class_map)
+            class_names = {
+                value.class_id: value.class_name for value in processed.result.classes
+            }
+            labels = []
+            for value in present_classes:
+                class_id = int(value)
+                blue, green, red = segmentation_color(class_id)
+                labels.append(
+                    "{0}: {1} color={2}".format(
+                        class_id,
+                        class_names[class_id],
+                        nearest_color_name((red, green, blue)),
+                    )
+                )
             self._write(
-                "frame fps={0} segmentation.classes={1}".format(
+                (
+                    "frame fps={0} segmentation.classes={1} segmentation.labels=[{2}]"
+                ).format(
                     fps,
-                    len(np.unique(processed.result.class_map)),
+                    len(present_classes),
+                    ", ".join(labels),
                 )
             )
         elif isinstance(processed.result, DepthResult):

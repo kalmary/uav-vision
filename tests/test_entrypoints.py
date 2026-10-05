@@ -226,7 +226,7 @@ def test_entrypoint_help_exposes_mode_specific_grouped_options(
             ProcessingType.SEGMENTATION,
             "models/yolo26n-sem.pt",
             640,
-            "segmentation.classes=1",
+            "segmentation.classes=1 segmentation.labels=[0: background color=brown]",
         ),
         (
             ProcessingType.DEPTH,

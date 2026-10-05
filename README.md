@@ -87,7 +87,12 @@ uv run uav-vision \
 The display scales each frame uniformly, centres it, and fills unused canvas
 space with black padding, so the source aspect ratio is preserved. Detection
 draws the filtered boxes and labels, segmentation draws a deterministic colour
-overlay and present-class labels, and depth uses a Viridis colour map. Every
+overlay without class labels, and depth uses a Viridis colour map. Segmentation
+class IDs, names, and basic colour names are included in the console log instead
+(for example, `2: building color=pink`). Each overlay colour is matched to the
+nearest RGB reference among black, white, red, orange, yellow, green, blue,
+purple, pink, and brown. Colours describe the overlay palette; the displayed
+colour is blended with the source image. Every
 view includes measured FPS. Press `q`, `Q`, or `Esc` while the window has focus
 to stop.
 
@@ -100,7 +105,7 @@ the missing weights on first use.
 | Mode | Default nano model | Inference input size | Basic per-frame result |
 | --- | --- | ---: | --- |
 | Detection | `models/yolo26n.pt` | 640 | Retained class name, confidence, and bounding box, or an explicit empty result |
-| Semantic segmentation | `models/yolo26n-sem.pt` | 640 | Number of unique classes present in the class map |
+| Semantic segmentation | `models/yolo26n-sem.pt` | 640 | Number of unique classes present, plus their IDs and names |
 | Depth | `models/yolo26n-depth.pt` | 768 | Minimum, maximum, mean, and population standard deviation |
 
 Depth values use metres with scale `1.0`. The other available aliases are

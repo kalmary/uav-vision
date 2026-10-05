@@ -23,12 +23,6 @@ The Rust implementation was removed. The project is planned as a modular Python 
 
 ## Work Log
 
-- Scope the next implementation step — reviewed all Markdown and code, defined the Step 2 capture contract, and requested approval before coding.
-- Approve Step 2 implementation — added replaceable OpenCV and GStreamer capture with explicit errors, cleanup, and automated tests.
-- Continue with Step 3 — reviewed the documentation and implemented replaceable YOLO inference and detection processing test-first.
-- Audit Step 3 completeness — confirmed all planned code is present through independent review and a real nano-model smoke test.
-- Implement Step 4 — added JSON and display outputs, the headless pipeline, application composition, and both console entry points.
-- Correct generated file scope — removed redundant root scripts and left `docs/todo_later.md` untouched as requested.
 - Report remaining Step 4 work — completed final review, CLI smoke tests, and compatibility verification.
 - Assess Step 5 hardware needs — separated locally preparable deployment work from validation that requires a physical Jetson Nano.
 - Prepare Step 5 without hardware — documented laptop use and a Jetson deployment and validation runbook with hardware-only results left pending.
@@ -73,3 +67,9 @@ The Rust implementation was removed. The project is planned as a modular Python 
 - Verify CLI retention — confirmed all CLI options remain available and explicit arguments override YAML defaults while omitted arguments retain configuration values; all CLI tests passed.
 - Review remaining functionality — found no missing feature in the agreed local scope; Jetson compatibility, acceleration, camera validation, and deployment documentation remain deferred, as does automatic camera discovery.
 - Expose configuration at the project root — moved the canonical YAML defaults to `config/app.yaml` and `config/yolo.yaml`, updated loading, installed data files, tests, and documentation, and verified CLI precedence plus source and installed-wheel lookup independently of the working directory.
+- Simplify segmentation display — removed image class labels while retaining colour overlays and FPS, added present class IDs and names to the existing logs, and updated documentation and regression coverage.
+- Investigate segmentation quality — verified Cityscapes training metadata, source-aligned class-map conversion, and unconditional per-pixel class selection; the reported false-car prediction still requires a representative frame to reproduce.
+- Include segmentation label colours — added RGB hex palette values to per-class logs, shared the colour calculation with display output, and updated documentation and regression tests.
+- Name segmentation colours — replaced hex log values with the nearest of ten basic RGB colour references while preserving the display palette, and added colour-matching, tie-breaking, and logging regression coverage.
+- Reverify segmentation boundaries — found pixel-identical application and direct Ultralytics class maps at input sizes 640, 1024, and 1280, checked source alignment and blend rounding, identified resolution and semantic-model comparison limits, and verified all 489 existing tests without changing runtime behavior.
+- Verify inference resizing — confirmed interpolated upscaling and downscaling with aspect-preserving letterboxing, preserved all four corner markers for small, large, and portrait inputs, and verified that mask postprocessing removes padding rather than camera content.
